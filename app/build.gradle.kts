@@ -1,14 +1,16 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
 }
 
 android {
-    namespace = "wang.lucian.smsforwarder"
+    namespace = "com.lanbing.smsforwarder"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "wang.lucian.smsforwarder"
+        applicationId = "com.lanbing.smsforwarder"
         minSdk = 21
         targetSdk = 34
 
@@ -16,15 +18,26 @@ android {
         val versionNameFromProp = (project.findProperty("VERSION_NAME") ?: System.getenv("VERSION_NAME"))?.toString()
         val versionCodeFromProp = (project.findProperty("VERSION_CODE") ?: System.getenv("VERSION_CODE"))?.toString()
 
-        versionName = versionNameFromProp ?: "2.9.8"
-        versionCode = (versionCodeFromProp?.toIntOrNull() ?: 40)
+        versionName = versionNameFromProp ?: "2.9.6"
+        versionCode = (versionCodeFromProp?.toIntOrNull() ?: 38)
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        manifestPlaceholders["appLabel"] = "短信转发助手"
     }
 
     // ---------- 新增：从环境变量或 gradle properties 加载签名信息 ----------
     // 优先级：ENV > project property > 本地 my-release-key.jks（便于本地测试）
     signingConfigs {
+        create("bark") {
+            val propertiesFile = rootProject.file("bark-signing.properties")
+            if (propertiesFile.exists()) {
+                val properties = Properties().apply { propertiesFile.inputStream().use { load(it) } }
+                storeFile = rootProject.file(properties.getProperty("storeFile"))
+                storePassword = properties.getProperty("storePassword")
+                keyAlias = properties.getProperty("keyAlias")
+                keyPassword = properties.getProperty("keyPassword")
+            }
+        }
         create("release") {
             val keystoreFileEnv = System.getenv("KEYSTORE_FILE")
             val keystoreFileProp = project.findProperty("KEYSTORE_FILE")?.toString()
@@ -72,6 +85,14 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("release")
         }
+        create("bark") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".bark"
+            versionNameSuffix = "-bark.26"
+            manifestPlaceholders["appLabel"] = "短信转发助手 Bark"
+            signingConfig = signingConfigs.getByName("bark")
+            matchingFallbacks += listOf("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8
@@ -87,6 +108,8 @@ android {
         compose = true
         buildConfig = true
     }
+    testOptions { unitTests.isIncludeAndroidResources = true }
+
     // 与下面的 Compose 版本保持一致
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.5"
@@ -116,6 +139,17 @@ android {
     }
 }
 
+// Never silently make a replacement signing key for a Bark release.
+tasks.matching { it.name == "preBarkBuild" || it.name == "validateSigningBark" }.configureEach {
+    doFirst {
+        val config = android.signingConfigs.getByName("bark")
+        check(config.storeFile?.isFile == true && !config.storePassword.isNullOrBlank() &&
+            !config.keyAlias.isNullOrBlank() && !config.keyPassword.isNullOrBlank()) {
+            "Restore bark-signing.properties and signing/smsforwarder-bark.jks from the signing backup before building Bark."
+        }
+    }
+}
+
 // 调试用：打印当前 versionName/versionCode
 tasks.register("printVersion") {
     doLast {
@@ -140,6 +174,8 @@ dependencies {
     val lifecycleRuntime = "2.7.0"
     val okhttpVersion = "4.12.0"
 
+    // Compatible with this project's Compose 1.6.x; GPU backdrop blur on Android API32+.
+    implementation("dev.chrisbanes.haze:haze:0.5.0")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:$lifecycleRuntime")
     implementation("androidx.activity:activity-compose:$activityComposeVersion")
@@ -160,6 +196,13 @@ dependencies {
 
     // Networking
     implementation("com.squareup.okhttp3:okhttp:$okhttpVersion")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.robolectric:robolectric:4.12.2")
+    testImplementation("androidx.compose.ui:ui-test-junit4:1.6.1")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.6.1")
+    testImplementation("org.json:json:20240303")
+    testImplementation("com.squareup.okhttp3:mockwebserver:$okhttpVersion")
 
 
 }

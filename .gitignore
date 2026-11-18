@@ -1,31 +1,28 @@
+# Existing project-specific exclusion
 docs/CODE_QUALITY_RISK_REPORT.md
 
-# Local secrets and runtime data
-.env
-.env.*
-!.env.example
-!.env.sample
+# Private signing credentials and backups
+bark-signing.properties
+signing/
 *.jks
 *.keystore
 *.p12
 *.pfx
-*_private.pem
-*.log
-__pycache__/
-*.pyc
-/docs/SOURCE_CODE.pdf
-/docs/新文档鉴别材料.pdf
-/docs/新程序鉴别材料.pdf
-/docs/短信转发助手 软件说明书.pdf
-/docs/软件运行截图/MuMu-20260406-130631-047.png
-/docs/软件运行截图/MuMu-20260406-130645-547.png
-/docs/软件运行截图/MuMu-20260406-130651-764.png
-/docs/软件运行截图/MuMu-20260406-130655-250.png
-/docs/软件运行截图/MuMu-20260406-130702-734.png
-/docs/软件运行截图/MuMu-20260406-130731-622.png
-/docs/软件运行截图/MuMu-20260406-130735-447.png
-/docs/软件运行截图/MuMu-20260406-130738-930.png
-/docs/软件运行截图/MuMu-20260406-130745-024.png
-/docs/软件运行截图/MuMu-20260406-130749-632.png
-/website/download/v2.7.11-stable.apk
-/website/download/v2.8.2-stable.apk
+*signing*backup*.zip
+
+# Local machine and editor files
+.DS_Store
+local.properties
+.gradle/
+.idea/
+*.iml
+
+# Generated build outputs (publish install packages through Releases)
+build/
+*.apk
+*.aab
+*.apk.idsig
+
+.DS_Store
+
+.DS_Store

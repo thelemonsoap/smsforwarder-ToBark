@@ -1,0 +1,1 @@
+<resources><string name="widget_app_name">短信转发助手</string><string name="widget_name">转发服务状态</string><string name="widget_description">查看服务状态和最近成功发送的消息，无定时刷新</string><string name="widget_refresh">刷新服务状态</string><string name="widget_status_unknown">点击刷新状态</string><string name="widget_tap_open">点击卡片打开应用</string></resources>

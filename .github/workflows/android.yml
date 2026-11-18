@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -20,20 +20,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Verify Android SDK 34
-        shell: bash
-        run: |
-          set -euo pipefail
-          SDK_ROOT="${ANDROID_HOME:?Android SDK is missing from the runner}"
-          SDK_MANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          test -x "$SDK_MANAGER"
-          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
-          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
-          if [[ ! -f "$SDK_ROOT/platforms/android-34/android.jar" || ! -x "$SDK_ROOT/build-tools/34.0.0/aapt2" ]]; then
-            "$SDK_MANAGER" --install "platforms;android-34" "build-tools;34.0.0"
-          fi
-          test -f "$SDK_ROOT/platforms/android-34/android.jar"
-          test -x "$SDK_ROOT/build-tools/34.0.0/aapt2"
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Decode keystore (from secret) if provided
         shell: bash

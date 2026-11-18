@@ -1,0 +1,27 @@
+name: Build Bark-compatible APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.4'
+      - name: Verify requests and build installable APK
+        run: gradle :app:testDebugUnitTest :app:assembleBark -PVERSION_NAME=2.9.8 -PVERSION_CODE=1 --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: smsforwarder-2.9.8-bark.1
+          path: app/build/outputs/apk/bark/*.apk

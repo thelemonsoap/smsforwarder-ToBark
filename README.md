@@ -1,11 +1,68 @@
+## Bark定制版 bark.14：Liquid Glass风格界面
+
+Liquid Glass风格界面版（2.9.8-bark.14，versionCode 14）
+沿用 bark.2 起永久签名，可直接覆盖 bark.13 及 bark.2～12，保留原有配置。
+本版为安卓原生Compose中的Liquid Glass风格设计：顶部工具栏、底部悬浮胶囊导航使用半透明材质、柔和高光、细边缘和阴影；内容卡片采用稳定、易读的标准表面。首页、关键词、通道、设置、日志及电话/通讯录/信号/应用通知卡片采用统一配色、间距和圆角，弹窗、输入框及状态提示同时适配。
+设置→外观与显示：跟随系统／浅色／深色，及“减少透明效果”。默认跟随系统；减少透明效果后使用实体背景，适合偏好更高可读性时开启。外观偏好仅保存在本机，不改变原业务配置导入导出，覆盖升级保留；原业务配置导出不包含本机外观偏好。
+设计原则参考Apple官方Liquid Glass材料与采用指南，但本版运行在安卓，不调用苹果原生Glass框架；采用轻量渐变、透明度与高光，不模拟完整的实时背景折射、镜头光学或持续实时模糊。无常驻光效、传感器动画或后台渲染任务；导航颜色仅在选择或主题变化时短暂过渡，遵守Compose的系统动画时长设置。文本不会被模糊；深浅色标题有对比度检查。
+保留短信/Bark、电话/未接/号码补充、通讯录姓名、应用通知、每10%连续电量、充电提醒、通话结束后30秒信号静默、5分钟波动过滤、Wi-Fi连接期间停止LTE／5G检测及此前省电优化。所有后台业务核心文件与 bark.13 保持逐字节一致；没有加入热点自动开关功能。权限清单不变。
+验证：原194项回归测试及4项Android界面渲染/交互测试，覆盖五页浅深色导航、外观切换、原业务配置保留、1.5倍字体、减少透明效果与标题对比度。预览由Robolectric Native Graphics运行真实Compose代码生成，空配置示例状态，不是三星实机截图，也不是设计稿。生成的全部渲染图片附在validation/glass-previews。
+重建：恢复独立签名备份后 ./gradlew :app:testDebugUnitTest :app:lintBark :app:assembleBark -PVERSION_NAME=2.9.8 -PVERSION_CODE=14。界面测试增加的Robolectric/Compose测试依赖仅用于测试，不进入Bark发布APK；测试需下载相应Android测试运行时并支持原生图形渲染。
+附完整源码、bark.13→bark.14增量补丁、构建与验证记录；私钥和密码文件继续独立保管、不包含在源码包中。原项目著作权与MIT许可全文保留，关于页注明本次界面修改。未做真实三星手机触摸/折叠屏/续航或iPhone Bark送达实测。
+参考：https://developer.apple.com/design/human-interface-guidelines/materials
+参考：https://developer.apple.com/documentation/TechnologyOverviews/adopting-liquid-glass
+
+
+## Bark 定制版 bark.13：Wi-Fi暂停移动信号检测
+
+Wi-Fi暂停移动信号检测版（2.9.8-bark.13，versionCode 13）
+沿用 bark.2 起永久签名，支持直接覆盖 bark.12 及 bark.2～11，保留配置。无需新增开关：连接Wi-Fi后自动暂停。
+已连接任意可见Wi-Fi网络时，注销信号提醒模块的数据连接、网络显示和数据SIM变化监听，并取消未成熟的5分钟信号观察。暂停LTE／5G信号提醒及尚未开始发送的排队/重试消息；Wi-Fi即使没有互联网、待网页登录或处于VPN下仍按连接处理。仅打开Wi-Fi开关但未连接时不暂停。已开始HTTP请求无法撤回。
+断开最后一个Wi-Fi后重新注册移动信号监听：丢弃Wi-Fi前的基准，默认静默观察5分钟确认当前LTE／5G，不补发Wi-Fi期间网络变化；之后新变化继续使用原固定5分钟窗口。若同时在通话静默期，则按原通话静默规则静默更新基准，不补发。首次仅蜂窝启动、未经历Wi-Fi时仍遵守原“开启时提醒当前网络”选项。
+使用系统被动网络回调和一次启动快照，不扫描SSID、不新增轮询、不获取位置；VPN默认路由不影响按Wi-Fi传输判断，跟踪全部匹配网络，避免多Wi-Fi切换时提前恢复。每次连接/断开更新代次，短暂连上又断开的Wi-Fi同样使旧信号发送失效。发送前另行核查Wi-Fi状态。网络回调监听注册失败时保守暂停信号检测，设置页显示原因，可点击“重新检查信号”。
+Wi-Fi暂停只影响信号提醒。短信、电话/未接/号码补充、通讯录姓名、应用通知、每10%连续电量及充电提醒保持原行为；电话状态监听继续用于电话提醒和通话结束后30秒的信号静默。保留 bark.11 省电和 bark.12 通讯录功能。
+本机保存一个“Wi-Fi后需重建信号基准”运行标记，用于进程重启后继续避免补发；此标记不导出、不含SSID/号码/网络地址。设置页及关于页注明Wi-Fi自动暂停，原项目版权和MIT许可全文保留。权限清单不变。
+重建：恢复独立签名备份后运行 ./gradlew :app:assembleBark -PVERSION_NAME=2.9.8 -PVERSION_CODE=13。
+附完整源码、bark.12→bark.13补丁及验证记录；签名私钥继续独立保管、不在源码包中。未真实三星Wi-Fi/蜂窝/VPN/双卡切换和iPhone Bark实测；依赖系统交付网络状态，进程未运行时无法追溯期间连接变化。
+
+
+## Bark 定制版 bark.12：通讯录姓名
+
+通讯录姓名版（2.9.8-bark.12，versionCode 12）
+沿用 bark.2 起永久签名，支持覆盖 bark.11 及 bark.2～10，保留配置。
+使用：设置 → 通讯录姓名 → 开启“短信和电话优先显示联系人”并授权读取通讯录。新开关默认关闭，不自动请求权限。拒绝或撤销通讯录权限时短信和电话仍正常转发，使用号码或未知号码；权限再次允许后自动生效。导入配置包含此开关，但系统授权须在本机完成；旧配置缺失此项时关闭。
+匹配成功只显示联系人姓名，不再附带对方号码；适用于短信、来电、未接/拒接及号码稍后补充提醒。本机SIM标识/本机号码仍按原设置处理。短信规则、发件人黑白名单、去重和失败队列仍使用原号码，不改成联系人姓名。
+默认Bark短信正文现在遵守“显示发件人”的配置，显示“来自: 姓名/号码”，短信原文完整保留。通用Webhook的原content字段仍保留；sender字段显示姓名优先，Bark读取的body包含默认发件人信息。已有自定义模板由用户决定布局，使用{sender}显示姓名优先，无此占位符的模板不额外插入发件人。默认隐藏发件人时姓名和对方号码均隐藏；自定义模板显式{sender}仍遵守原模板语义。
+号码仅做格式和明确国家码规范化：支持+86/0086与中国大陆手机号、+1与北美10位号码，不按任意后几位匹配。候选号码经核对再显示，多个不同姓名命中同一号码时回退号码；运营商提供姓名、网页黄页等网络查号不在本功能范围。受Android通讯录匹配规则与设备地区设置影响，个别号码可能仍无法匹配。
+查询发生在后台发送线程，仅按当前号码向本机通讯录查询姓名，不扫描或上传整本通讯录，不建立姓名持久化缓存或轮询。查询配有取消超时，查询失败回退原号码，不影响转发。已完成发送的通知不会被事后改写；新短信/来电和短信失败重试会按当时通讯录重新匹配。对方隐藏号码时无法凭空识别姓名。
+未改变5分钟固定信号波动过滤、通话结束后30秒信号静默、充放电每10%电量提醒、通知过滤去重及 bark.11 省电优化。关于页保留原开源项目、原著作权人和MIT许可全文，并补充本次改动。新增权限只有可选READ_CONTACTS。
+重建：恢复独立签名备份后运行 ./gradlew :app:assembleBark -PVERSION_NAME=2.9.8 -PVERSION_CODE=12。
+附完整源码、bark.11→bark.12补丁及验证记录。签名私钥继续独立保管、不在源码包中。未真实三星通讯录、权限授权/撤销、电话和iPhone Bark到达实测。
+
+
+## Bark 定制版 bark.11：省电优化
+
+省电优化版（2.9.8-bark.11，versionCode 11）
+沿用 bark.2 起永久签名，支持覆盖 bark.10 及 bark.2～9，保留配置。
+短信失败重试改为按最早到期消息安排一次任务；无失败队列时不再每10秒检查，无网络时等待网络恢复回调。保留原30/60/120/300秒重试节点（相对原消息时间），过期节点至少间隔10秒，网络恢复可立即重试。失败队列仅在进程首次使用时读盘；发送结果落盘前保留在途消息，避免并发网络回调重复启动同一批重试。崩溃发生在远端已接收但本机尚未保存结果之间时仍可能重发，不承诺严格只发送一次。
+日志改为追加写入，累计超出200+50条才整理；界面始终最多显示最近200条并保持最新在前。旧版日志首次使用时自动迁移，格式标记与数据一起原子替换，不影响旧日志内容。
+电量广播仅在需要提醒时获取SIM设备信息；连续电量状态未改变不重复写偏好设置。不相关应用通知被移除时不再保存未变化的去重快照。日志页后台/熄屏时暂停2秒自动刷新，回到前台恢复。
+保留5分钟固定信号波动窗口、通话至结束后30秒信号静默、短信即时转发、电话号码补全、应用通知筛选去重、充放电每10%及原电量提醒模板。关于页增加本次修改说明，原项目MIT许可全文保留；权限不增加。
+本版应用层优化适用于三星猎户座及其他Android芯片；不修改CPU调频、基带、内核，不承诺测得省电比例。为保持提醒及时，请保持通知/电话权限，不将本应用放入三星深度休眠名单。未做真实三星/Exynos耗电与后台送达实测。
+重建：恢复独立签名备份后运行 ./gradlew :app:assembleBark -PVERSION_NAME=2.9.8 -PVERSION_CODE=11。
+附完整源码、bark.10→bark.11增量补丁和本版构建/验证记录；签名私钥继续独立备份，不放入源码包。
+
+
 # 短信转发助手 (SmsForwarder.cn)
+
+> 本交付是 2.9.8-bark.3 用户定制版本。应用通知转发、电话提醒、升级迁移和固定签名构建说明见 [BARK_README.txt](BARK_README.txt)。
 
 <div align="center">
 
-![Version](https://img.shields.io/badge/version-2.9.8-blue.svg)
+![Version](https://img.shields.io/badge/version-2.9.6-blue.svg)
 ![Android](https://img.shields.io/badge/Android-5.0%2B-brightgreen.svg)
 ![License](https://img.shields.io/badge/license-MIT-orange.svg)
-[![GitHub Stars](https://img.shields.io/github/stars/Lucian-Wang/smsforwarder.cn?style=social)](https://github.com/Lucian-Wang/smsforwarder/stargazers)
+[![GitHub Stars](https://img.shields.io/github/stars/jinghong-me/smsforwarder.cn?style=social)](https://github.com/jinghong-me/smsforwarder.cn/stargazers)
 
 轻量、稳定、开源的 Android 短信转发应用。支持企业微信、钉钉、飞书和自定义 Webhook 等多种转发渠道，支持关键词过滤、验证码提取、自定义消息模板等功能。
 
@@ -14,13 +71,6 @@
 </div>
 
 ---
-
-
-## 正式版下载与构建
-
-打开 [Signed Android release](https://github.com/Lucian-Wang/smsforwarder/actions/workflows/android-release.yml)，选择成功的运行，在 Artifacts 下载 `smsforwarder-signed-release`，内含正式签名 APK 和 SHA256SUMS.txt。已发布标签的安装包见 [Releases](https://github.com/Lucian-Wang/smsforwarder/releases)。
-
-`main` 提交和手动运行会生成构建产物；推送 `v*` 标签后发布 Release。手动构建支持 `version_name`、`version_code`，配置说明见 [RELEASE.md](RELEASE.md)。当前流程使用 Lucian 签名并核验 APK 包名、证书指纹和非调试属性。相同包名但签名不同的 APK 不能覆盖安装。
 
 ## ✨ 功能特性
 
@@ -62,41 +112,39 @@
 
 ## 📥 下载安装
 
-### 历史版本记录
+### 最新版本
 | 版本 | 说明 | 下载链接 |
 |------|------|----------|
-| **v2.9.8** | 修复全局文字变灰问题（ModernCard 禁用状态导致透明度异常）；额外关键词列表美化（序号标签+卡片样式）；黑白名单快捷插入优化（发送者/内容分别预设正向/负向规则，白名单信任类、黑名单拦截类）；快速创建入口改为常驻显示，随时可快捷添加；快速创建通道名称自动去重。 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.9.7** | 额外关键词列表改为一行一个完整显示；发送者号码自动归一化兼容 +86 前缀；关于页面简介更新。 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.9.6** | 黑白名单快捷插入体验优化（发送者/内容分别预设正向/负向规则，白名单信任类、黑名单拦截类）；快速创建入口改为常驻显示，随时可快捷添加；快速创建通道名称自动去重；额外关键词列表改为一行一个完整显示；发送者号码自动归一化兼容 +86 前缀；关于页面简介更新。 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.9.5** | 新增快速创建引导（三步式向导），无通道时首页显示快速创建入口，3 步完成通道+关键词配置；修复配置导入丢失大量字段的严重问题；修复 ChannelLoader 和 MessageMatcher 的线程安全问题；ModernCard 增加 onClick 支持。 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.9.4** | 新增全局内容白名单/黑名单过滤；修复发送者黑白名单对带 +86 前缀号码匹配失效的问题（号码自动归一化）；修正发送者过滤 UI 描述示例；配置导入导出支持内容黑白名单。 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.9.3** | 全局消息模板改为手动保存（保存按钮 + 重置按钮）；占位符点击插入到光标位置而非末尾；日志页头部布局优化，增加实时刷新状态标签；修复多项 UI 交互问题。 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.9.2** | 新增正则表达式关键词匹配、发送者黑白名单过滤、多关键词 AND/OR 组合、自定义消息模板、通道测试按钮；全局消息模板编辑器替代原三开关；日志实时自动刷新；全面优化交互体验；多项性能和代码质量优化。 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.9.0** | 大幅精简APK体积（7MB→2MB+）；修复电量/充电提醒无法触发的问题；代码架构重构，抽取多个工具类提升可维护性。 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.8.2** | 增加充电提醒功能；增加防诈骗提示；重构配置导入导出功能（移除二维码方案，改用文件+文本方式）；优化电量提醒逻辑。 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.7.10** | 隐私合规整改：添加首次运行隐私政策弹窗（纯文本展示）；设置页面添加隐私政策查看入口和撤销同意功能；权限管理页面展示所有权限状态；优化隐私政策弹窗界面 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.7.9** | 隐私合规整改：优化权限申请时机，首次打开不再主动弹窗请求权限；用户点击开启服务时先显示权限说明对话框，引导用户到系统设置手动开启；移除直接系统权限请求弹窗 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.7.8** | 电量提醒消息添加SIM卡手机号标识，便于区分设备；修复飞书消息格式问题；低电量和高电量提醒可独立配置开关和阈值 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.7.7** | 修复SIM卡设置页面电话权限状态不实时更新问题；添加电话权限友好提示；添加开机自启动友好提示；更新隐私政策；新增电量提醒功能；优化APK大小；增强代码健壮性 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.7.6** | 修复首页权限状态实时更新问题；关于页面自动获取版本号；添加官方网址和备案号；删除版权信息中的版本号 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.7.5** | 更新签名证书，准备 APP 备案 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.7.2** | 优化更新对话框和关于对话框按钮样式，统一按钮大小和位置；修复双卡设备 SIM 卡识别 bug，SIM2 收到的短信现在会正确显示 SIM2 的本机号码；优化 subscriptionId 获取方式，提高兼容性 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.6.4** | 修复双卡设备 SIM 卡识别 bug，SIM2 收到的短信现在会正确显示 SIM2 的本机号码；优化 subscriptionId 获取方式，提高兼容性 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.6.1** | 更新关于对话框，添加版权信息和软件说明；调整菜单布局，避免功能重复 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.6.0** | 降低最低支持版本到 Android 5.0 (API 21)，支持更多设备 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| **v2.5.2** | 调整页面内容分配，首页包含服务开关和开机启动，设置页包含SIM卡和消息格式 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.5.1 | 修复自定义 SIM 号码显示逻辑问题，避免重复出现 SIM 卡 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.5.0 | 新增底部导航栏，将功能分为首页、关键词、通道、设置、日志5个标签页 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.4.1 | 优化自定义 SIM 号码功能，添加更清晰的使用提示 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.4.0 | 新增自定义 SIM 号码功能，无法自动获取时支持手动输入 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.3.0 | 新增消息格式配置选项、SIM 卡信息预览 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.2.0 | 新增本机号码识别，双卡设备支持显示接收短信号码 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.1.3 | 修复验证码识别错误，优化提取逻辑 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.1.2 | 调整验证码显示顺序，优化消息格式 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.1.0 | 验证码自动提取与突出显示 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.0.2 | 统一消息前缀格式 | [Releases](https://github.com/Lucian-Wang/smsforwarder/releases) |
-| v2.0.1 | 多关键词、多通道 | [v2.0.1](https://github.com/Lucian-Wang/smsforwarder/releases/tag/v2.0.1) |
-| v1.1 | 多关键词、单通道 | [v1.1](https://github.com/Lucian-Wang/smsforwarder/releases/tag/1.1) |
+| **v2.9.6** | 黑白名单快捷插入体验优化（发送者/内容分别预设正向/负向规则，白名单信任类、黑名单拦截类）；快速创建入口改为常驻显示，随时可快捷添加；快速创建通道名称自动去重；额外关键词列表改为一行一个完整显示；发送者号码自动归一化兼容 +86 前缀；关于页面简介更新。 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.9.5** | 新增快速创建引导（三步式向导），无通道时首页显示快速创建入口，3 步完成通道+关键词配置；修复配置导入丢失大量字段的严重问题；修复 ChannelLoader 和 MessageMatcher 的线程安全问题；ModernCard 增加 onClick 支持。 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.9.4** | 新增全局内容白名单/黑名单过滤；修复发送者黑白名单对带 +86 前缀号码匹配失效的问题（号码自动归一化）；修正发送者过滤 UI 描述示例；配置导入导出支持内容黑白名单。 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.9.3** | 全局消息模板改为手动保存（保存按钮 + 重置按钮）；占位符点击插入到光标位置而非末尾；日志页头部布局优化，增加实时刷新状态标签；修复多项 UI 交互问题。 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.9.2** | 新增正则表达式关键词匹配、发送者黑白名单过滤、多关键词 AND/OR 组合、自定义消息模板、通道测试按钮；全局消息模板编辑器替代原三开关；日志实时自动刷新；全面优化交互体验；多项性能和代码质量优化。 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.9.0** | 大幅精简APK体积（7MB→2MB+）；修复电量/充电提醒无法触发的问题；代码架构重构，抽取多个工具类提升可维护性。 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.8.2** | 增加充电提醒功能；增加防诈骗提示；重构配置导入导出功能（移除二维码方案，改用文件+文本方式）；优化电量提醒逻辑。 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.7.10** | 隐私合规整改：添加首次运行隐私政策弹窗（纯文本展示）；设置页面添加隐私政策查看入口和撤销同意功能；权限管理页面展示所有权限状态；优化隐私政策弹窗界面 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.7.9** | 隐私合规整改：优化权限申请时机，首次打开不再主动弹窗请求权限；用户点击开启服务时先显示权限说明对话框，引导用户到系统设置手动开启；移除直接系统权限请求弹窗 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.7.8** | 电量提醒消息添加SIM卡手机号标识，便于区分设备；修复飞书消息格式问题；低电量和高电量提醒可独立配置开关和阈值 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.7.7** | 修复SIM卡设置页面电话权限状态不实时更新问题；添加电话权限友好提示；添加开机自启动友好提示；更新隐私政策；新增电量提醒功能；优化APK大小；增强代码健壮性 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.7.6** | 修复首页权限状态实时更新问题；关于页面自动获取版本号；添加官方网址和备案号；删除版权信息中的版本号 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.7.5** | 更新签名证书，准备 APP 备案 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.7.2** | 优化更新对话框和关于对话框按钮样式，统一按钮大小和位置；修复双卡设备 SIM 卡识别 bug，SIM2 收到的短信现在会正确显示 SIM2 的本机号码；优化 subscriptionId 获取方式，提高兼容性 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.6.4** | 修复双卡设备 SIM 卡识别 bug，SIM2 收到的短信现在会正确显示 SIM2 的本机号码；优化 subscriptionId 获取方式，提高兼容性 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.6.1** | 更新关于对话框，添加版权信息和软件说明；调整菜单布局，避免功能重复 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.6.0** | 降低最低支持版本到 Android 5.0 (API 21)，支持更多设备 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| **v2.5.2** | 调整页面内容分配，首页包含服务开关和开机启动，设置页包含SIM卡和消息格式 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.5.1 | 修复自定义 SIM 号码显示逻辑问题，避免重复出现 SIM 卡 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.5.0 | 新增底部导航栏，将功能分为首页、关键词、通道、设置、日志5个标签页 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.4.1 | 优化自定义 SIM 号码功能，添加更清晰的使用提示 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.4.0 | 新增自定义 SIM 号码功能，无法自动获取时支持手动输入 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.3.0 | 新增消息格式配置选项、SIM 卡信息预览 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.2.0 | 新增本机号码识别，双卡设备支持显示接收短信号码 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.1.3 | 修复验证码识别错误，优化提取逻辑 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.1.2 | 调整验证码显示顺序，优化消息格式 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.1.0 | 验证码自动提取与突出显示 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.0.2 | 统一消息前缀格式 | [Releases](https://github.com/jinghong-me/smsforwarder.cn/releases) |
+| v2.0.1 | 多关键词、多通道 | [v2.0.1](https://github.com/jinghong-me/smsforwarder.cn/releases/tag/v2.0.1) |
+| v1.1 | 多关键词、单通道 | [v1.1](https://github.com/jinghong-me/smsforwarder.cn/releases/tag/1.1) |
 
 ---
 
@@ -127,7 +175,7 @@
 ### 隐私政策
 - 应用首次运行时会显示完整隐私政策弹窗（纯文本展示）
 - 用户可随时在设置页面查看隐私政策或撤销同意
-- 配置与日志存储在本地；开启转发后，匹配的短信及所配置的提醒会发送至用户指定的 Webhook 服务
+- 所有数据仅存储在本地，不上传服务器
 
 ---
 
@@ -201,7 +249,7 @@
 
 ### 项目结构
 ```
-app/src/main/java/wang/lucian/smsforwarder/
+app/src/main/java/com/lanbing/smsforwarder/
 ├── MainActivity.kt              # Compose UI、配置导入导出
 ├── SmsReceiver.kt               # 短信接收、转发、去重、重试
 ├── SmsForegroundService.kt      # 前台服务与通知
@@ -228,18 +276,16 @@ app/src/main/java/wang/lucian/smsforwarder/
 ```
 
 ### 本地构建
-
-需要 JDK 17、Gradle 8.4、Android SDK Platform 34 和 Build Tools 35.0.0，并配置 `ANDROID_HOME`。当前仓库没有 Gradle Wrapper 启动脚本，因此使用已安装的 `gradle`；Release 签名配置见 [RELEASE.md](RELEASE.md)。
 ```bash
 # 克隆仓库
-git clone https://github.com/Lucian-Wang/smsforwarder.git
-cd smsforwarder
+git clone https://github.com/jinghong-me/smsforwarder.cn.git
+cd smsforwarder.cn
 
 # 构建 Debug APK
-gradle clean :app:assembleDebug
+./gradlew clean :app:assembleDebug
 
 # 构建 Release APK（需要签名配置）
-gradle clean :app:assembleRelease
+./gradlew clean :app:assembleRelease
 ```
 
 ### 技术栈
@@ -260,9 +306,9 @@ A: 请在系统设置中：
 3. 锁定后台进程
 
 ### Q: 如何查看运行日志？
-A: 在应用内「日志」标签页查看（默认实时刷新），调试版也可通过 adb 拉取（正式版不支持 `run-as`）：
+A: 在应用内「日志」标签页查看（默认实时刷新），或通过 adb 拉取：
 ```bash
-adb shell run-as wang.lucian.smsforwarder cat files/sms_forwarder_logs.txt
+adb shell run-as com.lanbing.smsforwarder cat files/sms_forwarder_logs.txt
 ```
 
 ### Q: 转发失败怎么办？
@@ -302,7 +348,7 @@ A: 在应用内「设置」页面的「隐私设置」卡片中点击「隐私�
 A: 在应用内「设置」页面的「隐私设置」卡片中点击「撤销隐私政策同意」按钮，系统会清除同意状态并退出应用。
 
 ### Q: 应用会收集我的短信内容吗？
-A: 配置与日志保存在手机本地；执行转发时会将短信内容发送至您配置的目标服务，请核对目标服务及模板内容。
+A: 不会。所有数据仅存储在您的手机本地，不会上传到任何服务器。短信内容仅在转发时临时处理，转发目标由您自己配置。
 
 ### Q: 双卡手机如何区分哪个号码收到的短信？
 A: 应用会自动识别接收短信的 SIM 卡，并在转发消息中显示本机号码。如果无法自动获取，您可以在设置页面手动输入自定义 SIM 号码。
@@ -340,11 +386,3 @@ A: 打开应用后，在首页点击「快速创建」卡片，按三步向导�
 如果这个项目对你有帮助，欢迎给个 ⭐ Star！
 
 </div>
-
-
-作者：[Lucian](https://lucian.wang/) · 邮箱：im@lucian.wang
-
-
-## 应用标识
-
-应用 ID：`wang.lucian.smsforwarder`。本次包名变更后的 APK 会作为独立应用安装，不能覆盖升级旧包名版本；旧应用的数据和授权不会自动迁移，请先导出需要保留的数据，再安装并重新授权。

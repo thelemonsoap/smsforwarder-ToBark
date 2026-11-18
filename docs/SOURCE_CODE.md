@@ -6,9 +6,9 @@
 
 - **软件名称**：短信转发助手
 - **版本号**：V2.7.2
-- **著作权人**：Lucian
-- **开发者**：Lucian
-- **联系邮箱**：im@lucian.wang
+- **著作权人**：华昊科技有限公司
+- **开发者**：王士辉
+- **联系邮箱**：huahao@email.cn
 - **开发完成日期**：2026年4月5日
 - **源程序量**：约 4000 行
 
@@ -40,14 +40,14 @@
  * 短信转发助手
  * 版本：V2.7.2
  *
- * 著作权人：Lucian (https://lucian.wang/)
- * 开发者：Lucian
+ * 著作权人：华昊科技有限公司
+ * 开发者：王士辉
  *
- * Copyright (c) 2026 Lucian. All rights reserved.
- * 联系邮箱：im@lucian.wang
+ * Copyright (c) 2026 华昊科技有限公司. All rights reserved.
+ * 联系邮箱：huahao@email.cn
  */
 
-package wang.lucian.smsforwarder
+package com.lanbing.smsforwarder
 
 import android.Manifest
 import android.content.BroadcastReceiver
@@ -122,14 +122,14 @@ class BootReceiver : BroadcastReceiver() {
  * 短信转发助手
  * 版本：V2.7.2
  *
- * 著作权人：Lucian (https://lucian.wang/)
- * 开发者：Lucian
+ * 著作权人：华昊科技有限公司
+ * 开发者：王士辉
  *
- * Copyright (c) 2026 Lucian. All rights reserved.
- * 联系邮箱：im@lucian.wang
+ * Copyright (c) 2026 华昊科技有限公司. All rights reserved.
+ * 联系邮箱：huahao@email.cn
  */
 
-package wang.lucian.smsforwarder
+package com.lanbing.smsforwarder
 
 /**
  * Application constants.
@@ -186,14 +186,14 @@ object Constants {
  * 短信转发助手
  * 版本：V2.7.2
  *
- * 著作权人：Lucian (https://lucian.wang/)
- * 开发者：Lucian
+ * 著作权人：华昊科技有限公司
+ * 开发者：王士辉
  *
- * Copyright (c) 2026 Lucian. All rights reserved.
- * 联系邮箱：im@lucian.wang
+ * Copyright (c) 2026 华昊科技有限公司. All rights reserved.
+ * 联系邮箱：huahao@email.cn
  */
 
-package wang.lucian.smsforwarder
+package com.lanbing.smsforwarder
 
 import android.content.Context
 import java.io.BufferedReader
@@ -334,14 +334,14 @@ object LogStore {
  * 短信转发助手
  * 版本：V2.7.2
  *
- * 著作权人：Lucian (https://lucian.wang/)
- * 开发者：Lucian
+ * 著作权人：华昊科技有限公司
+ * 开发者：王士辉
  *
- * Copyright (c) 2026 Lucian. All rights reserved.
- * 联系邮箱：im@lucian.wang
+ * Copyright (c) 2026 华昊科技有限公司. All rights reserved.
+ * 联系邮箱：huahao@email.cn
  */
 
-package wang.lucian.smsforwarder
+package com.lanbing.smsforwarder
 
 import android.Manifest
 import android.app.Activity
@@ -2114,7 +2114,7 @@ fun AboutDialog(onDismiss: () -> Unit) {
                 HorizontalDivider()
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
-                    "© 2026 Lucian",
+                    "© 2026 华昊科技有限公司",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -3168,14 +3168,14 @@ private fun saveConfigs(prefs: android.content.SharedPreferences, configs: List<
  * 短信转发助手
  * 版本：V2.7.2
  *
- * 著作权人：Lucian (https://lucian.wang/)
- * 开发者：Lucian
+ * 著作权人：华昊科技有限公司
+ * 开发者：王士辉
  *
- * Copyright (c) 2026 Lucian. All rights reserved.
- * 联系邮箱：im@lucian.wang
+ * Copyright (c) 2026 华昊科技有限公司. All rights reserved.
+ * 联系邮箱：huahao@email.cn
  */
 
-package wang.lucian.smsforwarder
+package com.lanbing.smsforwarder
 
 /**
  * Shared model types for channels and keyword rules.
@@ -3204,14 +3204,14 @@ data class KeywordConfig(
  * 短信转发助手
  * 版本：V2.7.2
  *
- * 著作权人：Lucian (https://lucian.wang/)
- * 开发者：Lucian
+ * 著作权人：华昊科技有限公司
+ * 开发者：王士辉
  *
- * Copyright (c) 2026 Lucian. All rights reserved.
- * 联系邮箱：im@lucian.wang
+ * Copyright (c) 2026 华昊科技有限公司. All rights reserved.
+ * 联系邮箱：huahao@email.cn
  */
 
-package wang.lucian.smsforwarder
+package com.lanbing.smsforwarder
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -3277,14 +3277,14 @@ class NetworkChangeReceiver : BroadcastReceiver() {
  * 短信转发助手
  * 版本：V2.7.2
  *
- * 著作权人：Lucian (https://lucian.wang/)
- * 开发者：Lucian
+ * 著作权人：华昊科技有限公司
+ * 开发者：王士辉
  *
- * Copyright (c) 2026 Lucian. All rights reserved.
- * 联系邮箱：im@lucian.wang
+ * Copyright (c) 2026 华昊科技有限公司. All rights reserved.
+ * 联系邮箱：huahao@email.cn
  */
 
-package wang.lucian.smsforwarder
+package com.lanbing.smsforwarder
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -3307,8 +3307,8 @@ import android.util.Log
 class SmsForegroundService : Service() {
 
     companion object {
-        const val ACTION_UPDATE = "wang.lucian.smsforwarder.ACTION_LOG_UPDATED"
-        const val ACTION_STOP = "wang.lucian.smsforwarder.ACTION_STOP_SERVICE"
+        const val ACTION_UPDATE = "com.lanbing.smsforwarder.ACTION_LOG_UPDATED"
+        const val ACTION_STOP = "com.lanbing.smsforwarder.ACTION_STOP_SERVICE"
         private const val TAG = "SmsForegroundService"
         private var lastNotificationUpdateTime = 0L
     }
@@ -3549,14 +3549,14 @@ class SmsForegroundService : Service() {
  * 短信转发助手
  * 版本：V2.7.2
  *
- * 著作权人：Lucian (https://lucian.wang/)
- * 开发者：Lucian
+ * 著作权人：华昊科技有限公司
+ * 开发者：王士辉
  *
- * Copyright (c) 2026 Lucian. All rights reserved.
- * 联系邮箱：im@lucian.wang
+ * Copyright (c) 2026 华昊科技有限公司. All rights reserved.
+ * 联系邮箱：huahao@email.cn
  */
 
-package wang.lucian.smsforwarder
+package com.lanbing.smsforwarder
 
 import android.Manifest
 import android.content.BroadcastReceiver
@@ -4162,7 +4162,7 @@ class SmsReceiver : BroadcastReceiver() {
 
 ---
 
-**著作权人**：Lucian  
-**开发者**：Lucian  
+**著作权人**：华昊科技有限公司  
+**开发者**：王士辉  
 **版本**：V2.7.2  
-**联系邮箱**：im@lucian.wang
+**联系邮箱**：huahao@email.cn

@@ -1,10 +1,10 @@
 # ProGuard / R8 规则文件（激进裁剪版）
 
 # 保留数据模型类（被 JSON 反射使用）
--keep class wang.lucian.smsforwarder.Channel { *; }
--keep class wang.lucian.smsforwarder.KeywordConfig { *; }
--keep class wang.lucian.smsforwarder.ChannelType { *; }
--keep class wang.lucian.smsforwarder.ForwardResult { *; }
+-keep class com.lanbing.smsforwarder.Channel { *; }
+-keep class com.lanbing.smsforwarder.KeywordConfig { *; }
+-keep class com.lanbing.smsforwarder.ChannelType { *; }
+-keep class com.lanbing.smsforwarder.ForwardResult { *; }
 
 # 保留 BroadcastReceiver 入口（系统反射调用）
 -keep public class * extends android.content.BroadcastReceiver
@@ -16,7 +16,7 @@
 -keep public class * extends android.app.Application
 
 # 保留 MainActivity（被 Manifest 引用）
--keep class wang.lucian.smsforwarder.MainActivity { *; }
+-keep class com.lanbing.smsforwarder.MainActivity { *; }
 
 # Compose 运行时反射需要的类（最小保留，让 R8 裁剪其余部分）
 -dontwarn androidx.compose.**

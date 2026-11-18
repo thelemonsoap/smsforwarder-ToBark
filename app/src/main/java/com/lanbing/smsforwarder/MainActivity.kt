@@ -1,0 +1,6170 @@
+/*
+ * 短信转发助手
+ *
+ * 著作权人：华昊科技有限公司
+ * 开发者：王士辉
+ *
+ * Copyright (c) 2026 华昊科技有限公司. All rights reserved.
+ * 联系邮箱：huahao@email.cn
+ */
+
+package com.lanbing.smsforwarder
+
+import android.Manifest
+import com.lanbing.smsforwarder.ui.GlassShapes
+import com.lanbing.smsforwarder.ui.LiquidGlassTheme
+import com.lanbing.smsforwarder.ui.rememberGlassAppearance
+import com.lanbing.smsforwarder.ui.glassDarkMode
+import com.lanbing.smsforwarder.ui.liquidBackdrop
+import com.lanbing.smsforwarder.ui.liquidContentBackdrop
+import com.lanbing.smsforwarder.ui.LocalGlassInsets
+import com.lanbing.smsforwarder.ui.glassPagePadding
+import com.lanbing.smsforwarder.ui.LiquidAppHeader
+import com.lanbing.smsforwarder.ui.LiquidNavigationBar
+import com.lanbing.smsforwarder.ui.LiquidCard
+import com.lanbing.smsforwarder.ui.LiquidPageHeading
+import com.lanbing.smsforwarder.ui.GlassAppearanceCard
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Color as AndroidColor
+import android.net.Uri
+import android.os.Build
+import android.os.Bundle
+import android.os.FileObserver
+import android.os.PowerManager
+import android.provider.Settings
+import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.platform.testTag
+import com.lanbing.smsforwarder.ui.SettingsSection
+import com.lanbing.smsforwarder.ui.SettingsPageTransition
+import com.lanbing.smsforwarder.ui.LogPanelHeader
+import com.lanbing.smsforwarder.ui.LogMessageLayout
+import com.lanbing.smsforwarder.ui.SettingsHub
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.shape.RoundedCornerShape
+
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.*
+import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
+
+import org.json.JSONArray
+import org.json.JSONObject
+import com.lanbing.smsforwarder.utils.ChannelLoader
+import com.lanbing.smsforwarder.ExportConfig
+import com.lanbing.smsforwarder.MatchLogic
+import com.lanbing.smsforwarder.MatchMode
+import com.lanbing.smsforwarder.SenderMatchMode
+import com.lanbing.smsforwarder.utils.ConfigManager
+import com.lanbing.smsforwarder.utils.MessageMatcher
+import com.lanbing.smsforwarder.utils.MessageTemplateRenderer
+import com.lanbing.smsforwarder.utils.PushTemplates
+import com.lanbing.smsforwarder.utils.PermissionUtils
+import com.lanbing.smsforwarder.utils.SimInfoUtils
+import com.lanbing.smsforwarder.utils.WebhookSender
+import java.io.File
+import java.util.*
+
+/**
+ * MainActivity: 现代简洁风格的短信转发助手主界面
+ * - Material Design 3 设计
+ * - 支持规则测试功能
+ * - 添加电量优化白名单引导
+ * - 更现代的UI设计
+ */
+
+class MainActivity : ComponentActivity() {
+
+    private var onPermissionChanged: (() -> Unit)? = null
+    private var onConfigChanged: (() -> Unit)? = null
+    private lateinit var configImportLauncher: androidx.activity.result.ActivityResultLauncher<String>
+
+    private var pendingImportData: String? = null
+    private val showImportPreviewDialog = mutableStateOf(false)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        
+        configImportLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            uri?.let {
+                try {
+                    val inputStream = contentResolver.openInputStream(uri)
+                    val jsonStr = inputStream?.bufferedReader()?.use { it.readText() }
+                    inputStream?.close()
+                    if (jsonStr != null) {
+                        pendingImportData = jsonStr
+                        showImportPreviewDialog.value = true
+                    } else {
+                        Toast.makeText(this, "读取文件失败", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    Toast.makeText(this, "导入失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+
+        setContent {
+            val appearance = rememberGlassAppearance()
+            val isDarkTheme = glassDarkMode(appearance)
+            var permissionUpdateTrigger by remember { mutableStateOf(0) }
+            var configUpdateTrigger by remember { mutableStateOf(0) }
+
+            LiquidGlassTheme(dark = isDarkTheme, reducedTransparency = appearance.reduced) {
+                val activity = LocalContext.current as Activity
+                DisposableEffect(activity, isDarkTheme, appearance.fullscreen) {
+                    com.lanbing.smsforwarder.ui.ImmersiveSystemBars.apply(activity, isDarkTheme, appearance.fullscreen)
+                    onDispose {}
+                }
+
+                SideEffect {
+                    onPermissionChanged = { permissionUpdateTrigger++ }
+                    onConfigChanged = { configUpdateTrigger++ }
+                }
+
+                SmsForwarderApp(
+                    permissionUpdateTrigger = permissionUpdateTrigger,
+                    configUpdateTrigger = configUpdateTrigger,
+                    onRequestSmsPermission = {
+                        try {
+                            val intent = Intent().apply {
+                                action = "android.settings.APPLICATION_DETAILS_SETTINGS"
+                                data = Uri.fromParts("package", packageName, null)
+                            }
+                            startActivity(intent)
+                        } catch (_: Exception) {
+                            Toast.makeText(this, "请手动打开系统设置", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onRequestNotificationPermission = {
+                        try {
+                            val intent = Intent().apply {
+                                action = "android.settings.APPLICATION_DETAILS_SETTINGS"
+                                data = Uri.fromParts("package", packageName, null)
+                            }
+                            startActivity(intent)
+                        } catch (_: Exception) {
+                            Toast.makeText(this, "请手动打开系统设置", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    onStartService = { startServiceWithNotificationCheck() },
+                    onStopService = { onStopService() },
+                    onImportFromFile = {
+                        configImportLauncher.launch("application/json")
+                    },
+                    onPasteImport = { text ->
+                        pendingImportData = text
+                        showImportPreviewDialog.value = true
+                    },
+                    onDismissPreviewDialog = {
+                        pendingImportData = null
+                        showImportPreviewDialog.value = false
+                    },
+                    onConfirmImport = {
+                        val jsonStr = pendingImportData
+                        if (jsonStr != null) {
+                            importConfigFromJson(this, jsonStr) {
+                                onPermissionChanged?.invoke()
+                                onConfigChanged?.invoke()
+                            }
+                        }
+                        pendingImportData = null
+                        showImportPreviewDialog.value = false
+                    },
+                    showImportPreviewDialog = showImportPreviewDialog.value,
+                    pendingImportData = pendingImportData
+                )
+            }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+            val mode = prefs.getString(com.lanbing.smsforwarder.ui.GLASS_THEME_MODE, "system")
+            val dark = when (mode) {
+                "dark" -> true
+                "light" -> false
+                else -> resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK == android.content.res.Configuration.UI_MODE_NIGHT_YES
+            }
+            com.lanbing.smsforwarder.ui.ImmersiveSystemBars.apply(this, dark, prefs.getBoolean(com.lanbing.smsforwarder.ui.GLASS_FULLSCREEN, true))
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 从设置页面回来时，刷新权限状态
+        onPermissionChanged?.invoke()
+        // A package update or OS reclamation can leave enabled=true without a live service.
+        // Starting from a visible activity restores callbacks and reapplies newly granted permissions.
+        com.lanbing.smsforwarder.utils.ForwardingServiceController.ensureRunning(this)
+        sendBroadcast(Intent(SmsForegroundService.ACTION_UPDATE).setPackage(packageName))
+        com.lanbing.smsforwarder.utils.NotificationSettings.requestConnection(this)
+    }
+
+    private fun onStopService() {
+        val svc = Intent(this, SmsForegroundService::class.java)
+        stopService(svc)
+    }
+
+    private fun startServiceWithNotificationCheck() {
+        val pkg = packageName
+        val notifEnabled = NotificationManagerCompat.from(this).areNotificationsEnabled()
+        if (!notifEnabled) {
+            Toast.makeText(this, "请允许应用通知（将打开通知设置）", Toast.LENGTH_LONG).show()
+            val i = Intent().apply {
+                action = Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                putExtra(Settings.EXTRA_APP_PACKAGE, pkg)
+            }
+            startActivity(i)
+            return
+        }
+
+        val smsGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+        if (!smsGranted) return
+
+        val svc = Intent(this, SmsForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc) else startService(svc)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SmsForwarderApp(
+    permissionUpdateTrigger: Int,
+    configUpdateTrigger: Int,
+    onRequestSmsPermission: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+    onStartService: () -> Unit,
+    onStopService: () -> Unit,
+    onDismissPreviewDialog: () -> Unit = {},
+    onConfirmImport: () -> Unit = {},
+    showImportPreviewDialog: Boolean = false,
+    pendingImportData: String? = null,
+    onImportFromFile: () -> Unit = {},
+    onPasteImport: (String) -> Unit = {}
+) {
+    val context = LocalContext.current
+    val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+
+    var isEnabled by remember(configUpdateTrigger, permissionUpdateTrigger) { mutableStateOf(prefs.getBoolean(Constants.PREF_ENABLED, false)) }
+    var startOnBoot by remember(configUpdateTrigger) { mutableStateOf(prefs.getBoolean(Constants.PREF_START_ON_BOOT, false)) }
+
+    // 发送者黑白名单
+    var senderWhitelist by remember(configUpdateTrigger) {
+        mutableStateOf(loadSenderFilterList(prefs, Constants.PREF_SENDER_WHITELIST))
+    }
+    var senderBlacklist by remember(configUpdateTrigger) {
+        mutableStateOf(loadSenderFilterList(prefs, Constants.PREF_SENDER_BLACKLIST))
+    }
+
+    // 内容黑白名单
+    var contentWhitelist by remember(configUpdateTrigger) {
+        mutableStateOf(loadSenderFilterList(prefs, Constants.PREF_CONTENT_WHITELIST))
+    }
+    var contentBlacklist by remember(configUpdateTrigger) {
+        mutableStateOf(loadSenderFilterList(prefs, Constants.PREF_CONTENT_BLACKLIST))
+    }
+    var showReceiverPhone by remember(configUpdateTrigger) { mutableStateOf(prefs.getBoolean(Constants.PREF_SHOW_RECEIVER_PHONE, true)) }
+    var showSenderPhone by remember(configUpdateTrigger) { mutableStateOf(prefs.getBoolean(Constants.PREF_SHOW_SENDER_PHONE, true)) }
+    var highlightVerificationCode by remember(configUpdateTrigger) { mutableStateOf(prefs.getBoolean(Constants.PREF_HIGHLIGHT_VERIFICATION_CODE, true)) }
+    var globalMessageTemplate by remember(configUpdateTrigger) {
+        mutableStateOf(
+            prefs.getString(Constants.PREF_GLOBAL_MESSAGE_TEMPLATE, null)
+                ?: MessageTemplateRenderer.getPresetTemplates().find { it.first == "验证码优先" }?.second
+                ?: "验证码: {code}\n{content}"
+        )
+    }
+    var batteryReminderEnabled by remember(configUpdateTrigger) { mutableStateOf(prefs.getBoolean(Constants.PREF_BATTERY_REMINDER_ENABLED, false)) }
+    var lowBatteryReminderEnabled by remember(configUpdateTrigger) { mutableStateOf(prefs.getBoolean(Constants.PREF_LOW_BATTERY_REMINDER_ENABLED, true)) }
+    var highBatteryReminderEnabled by remember(configUpdateTrigger) { mutableStateOf(prefs.getBoolean(Constants.PREF_HIGH_BATTERY_REMINDER_ENABLED, true)) }
+    var chargingReminderEnabled by remember(configUpdateTrigger) { mutableStateOf(prefs.getBoolean(Constants.PREF_CHARGING_REMINDER_ENABLED, false)) }
+    var batteryReminderChannelId by remember(configUpdateTrigger) { mutableStateOf(prefs.getString(Constants.PREF_BATTERY_REMINDER_CHANNEL_ID, null)) }
+    var lowBatteryThreshold by remember(configUpdateTrigger) { mutableStateOf(prefs.getInt(Constants.PREF_LOW_BATTERY_THRESHOLD, Constants.DEFAULT_LOW_BATTERY_THRESHOLD)) }
+    var highBatteryThreshold by remember(configUpdateTrigger) { mutableStateOf(prefs.getInt(Constants.PREF_HIGH_BATTERY_THRESHOLD, Constants.DEFAULT_HIGH_BATTERY_THRESHOLD)) }
+    var customSim1Phone by remember(configUpdateTrigger) { mutableStateOf(prefs.getString(Constants.PREF_CUSTOM_SIM1_PHONE, null)) }
+    var customSim2Phone by remember(configUpdateTrigger) { mutableStateOf(prefs.getString(Constants.PREF_CUSTOM_SIM2_PHONE, null)) }
+
+    var channels by remember(configUpdateTrigger) { mutableStateOf(loadChannels(prefs)) }
+    var configs by remember(configUpdateTrigger) { mutableStateOf(loadConfigs(prefs)) }
+
+    // 导出/导入对话框状态
+    var showExportDialog by remember { mutableStateOf(false) }
+    var showImportDialog by remember { mutableStateOf(false) }
+    var showPasteDialog by remember { mutableStateOf(false) }
+    var exportJsonStr by remember { mutableStateOf("") }
+    var pasteText by remember { mutableStateOf("") }
+
+    // Channel form state
+    var newChannelName by remember { mutableStateOf("") }
+    var newChannelTarget by remember { mutableStateOf("") }
+    var newChannelType by remember { mutableStateOf(ChannelType.WECHAT) }
+    var channelTypeExpanded by remember { mutableStateOf(false) }
+
+    // Config form state
+    var newKeywordInput by remember { mutableStateOf("") }
+    var selectedChannelIdForNewCfg by remember { mutableStateOf(channels.firstOrNull()?.id ?: "") }
+    var configChannelDropdownExpanded by remember { mutableStateOf(false) }
+
+    // Editing state
+    var editingChannel by remember { mutableStateOf<Channel?>(null) }
+    var showChannelDialog by remember { mutableStateOf(false) }
+    var editChannelName by remember { mutableStateOf("") }
+    var editChannelTarget by remember { mutableStateOf("") }
+    var editChannelType by remember { mutableStateOf(ChannelType.WECHAT) }
+    var editChannelTemplate by remember { mutableStateOf(TextFieldValue("")) }
+
+    var editingConfig by remember { mutableStateOf<KeywordConfig?>(null) }
+    var showConfigDialog by remember { mutableStateOf(false) }
+    var editConfigKeyword by remember { mutableStateOf("") }
+    var editConfigChannelId by remember { mutableStateOf("") }
+    var editConfigMatchMode by remember { mutableStateOf(MatchMode.CONTAINS) }
+    var editConfigMatchLogic by remember { mutableStateOf(MatchLogic.OR) }
+    var editConfigExtraKeywords by remember { mutableStateOf("") }
+    var editConfigSenderPattern by remember { mutableStateOf("") }
+    var editConfigSenderMatchMode by remember { mutableStateOf(SenderMatchMode.CONTAINS) }
+    var editConfigEnabled by remember { mutableStateOf(true) }
+
+    // UI state
+    var logs by remember { mutableStateOf(LogStore.readAll(context)) }
+    var logAutoRefresh by remember { mutableStateOf(true) }
+    var currentTab by rememberSaveable { mutableStateOf(0) }
+    var settingsSection by rememberSaveable { mutableStateOf<SettingsSection?>(null) }
+    BackHandler(enabled = currentTab == 3 && settingsSection != null) { settingsSection = null }
+    var showTestDialog by remember { mutableStateOf(false) }
+    var showAboutDialog by remember { mutableStateOf(false) }
+    var showBootTipDialog by remember { mutableStateOf(false) }
+    var showPermissionDialog by remember { mutableStateOf(false) }
+    var showQuickSetupDialog by remember { mutableStateOf(false) }
+    var showPrivacyDialog by remember { mutableStateOf(false) }
+    
+    LaunchedEffect(Unit) {
+        val hasAgreedPrivacy = prefs.getBoolean(Constants.PREF_PRIVACY_AGREED, false)
+        if (!hasAgreedPrivacy) {
+            showPrivacyDialog = true
+        }
+    }
+    
+    DisposableEffect(Unit) {
+        val logFile = File(context.filesDir, Constants.LOG_FILE_NAME)
+        @Suppress("DEPRECATION")
+        val observer = object : FileObserver(logFile.parent ?: context.filesDir.absolutePath, FileObserver.MODIFY or FileObserver.CREATE) {
+            override fun onEvent(event: Int, path: String?) {
+                if (path == Constants.LOG_FILE_NAME && event and (MODIFY or CREATE) != 0) {
+                    logs = LogStore.readAll(context)
+                }
+            }
+        }
+        observer.startWatching()
+        onDispose {
+            observer.stopWatching()
+        }
+    }
+    
+    // 定义5个标签页
+    val tabs = listOf(
+        "首页" to Icons.Default.Home,
+        "关键词" to Icons.Default.Label,
+        "通道" to Icons.Default.Cloud,
+        "设置" to Icons.Default.Settings,
+        "日志" to Icons.Default.History
+    )
+
+    // Permission states (use key to trigger recomposition)
+    val smsGranted by remember(permissionUpdateTrigger) {
+        derivedStateOf {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+    val notifGranted by remember(permissionUpdateTrigger) {
+        derivedStateOf {
+            NotificationManagerCompat.from(context).areNotificationsEnabled()
+        }
+    }
+
+    // Battery optimization state
+    val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    val isIgnoringBatteryOptimizations by remember(permissionUpdateTrigger) {
+        derivedStateOf {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                powerManager.isIgnoringBatteryOptimizations(context.packageName)
+            } else true
+        }
+    }
+
+    Scaffold(
+        modifier = Modifier.liquidBackdrop(),
+        containerColor = Color.Transparent,
+        contentColor = MaterialTheme.colorScheme.onBackground,
+        topBar = { LiquidAppHeader(isEnabled, onAbout = { showAboutDialog = true },
+            title = settingsSection?.takeIf { currentTab == 3 }?.title,
+            onBack = if (currentTab == 3 && settingsSection != null) ({ settingsSection = null }) else null) },
+        bottomBar = { LiquidNavigationBar(currentTab, onSelected = { settingsSection = null; currentTab = it }) }
+    ) { innerPadding ->
+        CompositionLocalProvider(LocalGlassInsets provides innerPadding) {
+        Box(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal)).liquidContentBackdrop()) {
+            AnimatedContent(
+                targetState = currentTab,
+                modifier = Modifier.fillMaxSize(),
+                label = "tabAnimation"
+            ) { tabIndex ->
+                when (tabIndex) {
+                    0 -> HomeTab(
+                        isEnabled = isEnabled,
+                        onEnabledChange = { checked ->
+                            if (checked) {
+                                val hasNotif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+                                } else {
+                                    true
+                                }
+                                val hasSms = ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                                
+                                if (!hasNotif || !hasSms) {
+                                    showPermissionDialog = true
+                                    return@HomeTab
+                                }
+                                
+                                isEnabled = true
+                                prefs.edit().putBoolean(Constants.PREF_ENABLED, isEnabled).apply()
+                                com.lanbing.smsforwarder.widget.ServiceStatusWidget.updateAll(context)
+                                onStartService()
+                                LogStore.append(context, "服务已启动（由用户开启）")
+                                context.sendBroadcast(Intent(SmsForegroundService.ACTION_UPDATE))
+                            } else {
+                                isEnabled = false
+                                prefs.edit().putBoolean(Constants.PREF_ENABLED, isEnabled).apply()
+                                com.lanbing.smsforwarder.widget.ServiceStatusWidget.updateAll(context)
+                                onStopService()
+                                LogStore.append(context, "服务已停止（由用户关闭）")
+                                context.sendBroadcast(Intent(SmsForegroundService.ACTION_UPDATE))
+                            }
+                        },
+                        startOnBoot = startOnBoot,
+                        onStartOnBootChange = {
+                            startOnBoot = it
+                            prefs.edit().putBoolean(Constants.PREF_START_ON_BOOT, startOnBoot).apply()
+                            if (startOnBoot) {
+                                LogStore.append(context, "已开启开机启动")
+                                showBootTipDialog = true
+                            } else {
+                                LogStore.append(context, "已关闭开机启动")
+                            }
+                        },
+                        smsGranted = smsGranted,
+                        notifGranted = notifGranted,
+                        isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations,
+                        onRequestSmsPermission = onRequestSmsPermission,
+                        onRequestNotificationPermission = onRequestNotificationPermission,
+                        onRequestBatteryOptimization = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                }
+                                context.startActivity(intent)
+                            }
+                        },
+                        onQuickSetup = { showQuickSetupDialog = true },
+                        hasChannels = channels.isNotEmpty()
+                    )
+                    1 -> KeywordTab(
+                        channels = channels,
+                        configs = configs,
+                        newKeywordInput = newKeywordInput,
+                        onNewKeywordInputChange = { newKeywordInput = it },
+                        selectedChannelIdForNewCfg = selectedChannelIdForNewCfg,
+                        onSelectedChannelIdForNewCfgChange = { selectedChannelIdForNewCfg = it },
+                        configChannelDropdownExpanded = configChannelDropdownExpanded,
+                        onConfigChannelDropdownExpandedChange = { configChannelDropdownExpanded = it },
+                        onAddConfig = {
+                            if (channels.isEmpty()) {
+                                Toast.makeText(context, "请先添加通道", Toast.LENGTH_SHORT).show()
+                                return@KeywordTab
+                            }
+                            if (selectedChannelIdForNewCfg.isBlank()) {
+                                Toast.makeText(context, "请选择通道", Toast.LENGTH_SHORT).show()
+                                return@KeywordTab
+                            }
+                            val newCfg = KeywordConfig(UUID.randomUUID().toString(), newKeywordInput.trim(), selectedChannelIdForNewCfg)
+                            configs = configs + newCfg
+                            saveConfigs(prefs, configs)
+                            newKeywordInput = ""
+                            LogStore.append(context, "添加关键词: ${newCfg.keyword} -> ${channels.find { it.id == newCfg.channelId }?.name}")
+                            Toast.makeText(context, "配置已添加", Toast.LENGTH_SHORT).show()
+                        },
+                        onDeleteConfig = { cfg ->
+                            configs = configs.filterNot { it.id == cfg.id }
+                            saveConfigs(prefs, configs)
+                        },
+                        onEditConfig = { cfg ->
+                            editingConfig = cfg
+                            editConfigKeyword = cfg.keyword
+                            editConfigChannelId = cfg.channelId
+                            editConfigMatchMode = cfg.matchMode
+                            editConfigMatchLogic = cfg.matchLogic
+                            editConfigExtraKeywords = cfg.extraKeywords.joinToString("\n")
+                            editConfigSenderPattern = cfg.senderPattern ?: ""
+                            editConfigSenderMatchMode = cfg.senderMatchMode
+                            editConfigEnabled = cfg.enabled
+                            showConfigDialog = true
+                        }
+                    )
+                    2 -> ChannelTab(
+                        channels = channels,
+                        newChannelName = newChannelName,
+                        onNewChannelNameChange = { newChannelName = it },
+                        newChannelTarget = newChannelTarget,
+                        onNewChannelTargetChange = { newChannelTarget = it },
+                        newChannelType = newChannelType,
+                        onNewChannelTypeChange = { newChannelType = it },
+                        channelTypeExpanded = channelTypeExpanded,
+                        onChannelTypeExpandedChange = { channelTypeExpanded = it },
+                        onAddChannel = {
+                            if (newChannelName.isBlank() || newChannelTarget.isBlank()) {
+                                Toast.makeText(context, "请填写通道名称和 Webhook 地址", Toast.LENGTH_SHORT).show()
+                                return@ChannelTab
+                            }
+                            if (!WebhookSender.isValidUrl(newChannelTarget)) {
+                                Toast.makeText(context, "Webhook 地址格式无效，请输入有效的 http:// 或 https:// 地址", Toast.LENGTH_SHORT).show()
+                                return@ChannelTab
+                            }
+                            val newChannel = Channel(UUID.randomUUID().toString(), newChannelName.trim(), newChannelType, newChannelTarget.trim())
+                            channels = channels + newChannel
+                            saveChannels(prefs, channels)
+                            selectedChannelIdForNewCfg = channels.firstOrNull()?.id ?: ""
+                            newChannelName = ""
+                            newChannelTarget = ""
+                            LogStore.append(context, "添加通道: ${newChannel.name} (${newChannel.type})")
+                            Toast.makeText(context, "通道已添加", Toast.LENGTH_SHORT).show()
+                        },
+                        onDeleteChannel = { ch ->
+                            channels = channels.filterNot { it.id == ch.id }
+                            saveChannels(prefs, channels)
+                            configs = configs.filterNot { it.channelId == ch.id }
+                            saveConfigs(prefs, configs)
+                            LogStore.append(context, "删除通道: ${ch.name}")
+                        },
+                        onEditChannel = { ch ->
+                            editingChannel = ch
+                            editChannelName = ch.name
+                            editChannelTarget = ch.target
+                            editChannelType = ch.type
+                            editChannelTemplate = TextFieldValue(ch.messageTemplate ?: "")
+                            showChannelDialog = true
+                        }
+                    )
+                    3 -> SettingsTab(
+                        section = settingsSection,
+                        onSectionChange = { settingsSection = it },
+                        globalMessageTemplate = globalMessageTemplate,
+                        onSaveGlobalTemplate = { newTemplate ->
+                            globalMessageTemplate = newTemplate
+                            prefs.edit().putString(Constants.PREF_GLOBAL_MESSAGE_TEMPLATE, newTemplate).apply()
+                            LogStore.append(context, "全局消息模板已更新")
+                            Toast.makeText(context, "已保存", Toast.LENGTH_SHORT).show()
+                        },
+                        batteryReminderEnabled = batteryReminderEnabled,
+                        onBatteryReminderEnabledChange = {
+                            batteryReminderEnabled = it
+                            prefs.edit().putBoolean(Constants.PREF_BATTERY_REMINDER_ENABLED, batteryReminderEnabled).apply()
+                            // 重置初始化标记，确保下次服务启动时正确初始化充电状态
+                            prefs.edit().remove("last_charging_state_initialized").apply()
+                            if (batteryReminderEnabled) {
+                                LogStore.append(context, "已开启电量提醒")
+                                onStartService()
+                            } else {
+                                LogStore.append(context, "已关闭电量提醒")
+                            }
+                            // 通知服务刷新电量监听器注册状态
+                            context.sendBroadcast(Intent(SmsForegroundService.ACTION_UPDATE))
+                        },
+                        lowBatteryReminderEnabled = lowBatteryReminderEnabled,
+                        onLowBatteryReminderEnabledChange = {
+                            lowBatteryReminderEnabled = it
+                            prefs.edit().putBoolean(Constants.PREF_LOW_BATTERY_REMINDER_ENABLED, lowBatteryReminderEnabled).apply()
+                            if (lowBatteryReminderEnabled) LogStore.append(context, "已开启低电量提醒") else LogStore.append(context, "已关闭低电量提醒")
+                        },
+                        highBatteryReminderEnabled = highBatteryReminderEnabled,
+                        onHighBatteryReminderEnabledChange = {
+                            highBatteryReminderEnabled = it
+                            prefs.edit().putBoolean(Constants.PREF_HIGH_BATTERY_REMINDER_ENABLED, highBatteryReminderEnabled).apply()
+                            if (highBatteryReminderEnabled) LogStore.append(context, "已开启高电量提醒") else LogStore.append(context, "已关闭高电量提醒")
+                        },
+                        chargingReminderEnabled = chargingReminderEnabled,
+                        onChargingReminderEnabledChange = {
+                            chargingReminderEnabled = it
+                            prefs.edit().putBoolean(Constants.PREF_CHARGING_REMINDER_ENABLED, chargingReminderEnabled).apply()
+                            // 重置初始化标记，确保下次服务启动时正确初始化充电状态
+                            prefs.edit().remove("last_charging_state_initialized").apply()
+                            if (chargingReminderEnabled) {
+                                LogStore.append(context, "已开启充电提醒")
+                                onStartService()
+                            } else {
+                                LogStore.append(context, "已关闭充电提醒")
+                            }
+                            // 通知服务刷新电量监听器注册状态
+                            context.sendBroadcast(Intent(SmsForegroundService.ACTION_UPDATE))
+                        },
+                        batteryReminderChannelId = batteryReminderChannelId,
+                        onBatteryReminderChannelIdChange = {
+                            batteryReminderChannelId = it
+                            prefs.edit().putString(Constants.PREF_BATTERY_REMINDER_CHANNEL_ID, batteryReminderChannelId).apply()
+                        },
+                        channels = channels,
+                        lowBatteryThreshold = lowBatteryThreshold,
+                        onLowBatteryThresholdChange = {
+                            lowBatteryThreshold = it
+                            prefs.edit().putInt(Constants.PREF_LOW_BATTERY_THRESHOLD, lowBatteryThreshold).apply()
+                        },
+                        highBatteryThreshold = highBatteryThreshold,
+                        onHighBatteryThresholdChange = {
+                            highBatteryThreshold = it
+                            prefs.edit().putInt(Constants.PREF_HIGH_BATTERY_THRESHOLD, highBatteryThreshold).apply()
+                        },
+                        onShowTestDialog = { showTestDialog = true },
+                        onRevokePrivacyConsent = {
+                            prefs.edit().remove(Constants.PREF_PRIVACY_AGREED).apply()
+                            context.sendBroadcast(Intent(SmsForegroundService.ACTION_UPDATE).setPackage(context.packageName))
+                            (context as Activity).finish()
+                        },
+                        onShowPrivacyPolicy = { showPrivacyDialog = true },
+                        permissionUpdateTrigger = permissionUpdateTrigger,
+                        onExportConfig = {
+                            val exportCfg = ExportConfig(
+                                channels = channels,
+                                keywordConfigs = configs,
+                                showReceiverPhone = showReceiverPhone,
+                                showSenderPhone = showSenderPhone,
+                                highlightVerificationCode = highlightVerificationCode,
+                                globalMessageTemplate = globalMessageTemplate,
+                                pushTemplates = PushTemplates.readMap(prefs, Constants.PREF_PUSH_TEMPLATES),
+                                appNotificationTemplates = PushTemplates.readMap(prefs, Constants.PREF_APP_PUSH_TEMPLATES),
+                                contactNameEnabled = prefs.getBoolean(Constants.PREF_CONTACT_NAME_ENABLED, false),
+                                batteryStepReminderEnabled = prefs.getBoolean(Constants.PREF_BATTERY_STEP_ENABLED, false),
+                                batteryReminderEnabled = batteryReminderEnabled,
+                                lowBatteryReminderEnabled = lowBatteryReminderEnabled,
+                                highBatteryReminderEnabled = highBatteryReminderEnabled,
+                                chargingReminderEnabled = chargingReminderEnabled,
+                                batteryReminderChannelId = batteryReminderChannelId,
+                                lowBatteryThreshold = lowBatteryThreshold,
+                                highBatteryThreshold = highBatteryThreshold,
+                                customSim1Phone = customSim1Phone,
+                                customSim2Phone = customSim2Phone,
+                                startOnBoot = startOnBoot,
+                                senderWhitelist = senderWhitelist,
+                                senderBlacklist = senderBlacklist,
+                                contentWhitelist = contentWhitelist,
+                                contentBlacklist = contentBlacklist,
+                                callReminderEnabled = prefs.getBoolean(Constants.PREF_CALL_REMINDER_ENABLED, false),
+                                missedCallReminderEnabled = prefs.getBoolean(Constants.PREF_MISSED_CALL_REMINDER_ENABLED, false),
+                                callReminderChannelId = prefs.getString(Constants.PREF_CALL_REMINDER_CHANNEL_ID, null),
+                                signalReminderEnabled = prefs.getBoolean(Constants.PREF_SIGNAL_REMINDER_ENABLED, false),
+                                signalReminderChannelId = prefs.getString(Constants.PREF_SIGNAL_CHANNEL_ID, null),
+                                signalSendInitial = prefs.getBoolean(Constants.PREF_SIGNAL_SEND_INITIAL, true),
+                                signalPauseDuringCalls = prefs.getBoolean(Constants.PREF_SIGNAL_PAUSE_DURING_CALLS, true),
+                                appNotificationEnabled = prefs.getBoolean(Constants.PREF_APP_NOTIFICATION_ENABLED, false),
+                                appNotificationPackages = com.lanbing.smsforwarder.utils.NotificationSettings.selectedPackages(prefs).sorted(),
+                                appNotificationChannelId = prefs.getString(Constants.PREF_APP_NOTIFICATION_CHANNEL_ID, null),
+                                appNotificationSkipPhoneSms = prefs.getBoolean(Constants.PREF_APP_NOTIFICATION_SKIP_PHONE_SMS, true),
+                                appNotificationSkipOngoing = prefs.getBoolean(Constants.PREF_APP_NOTIFICATION_SKIP_ONGOING, true)
+                            )
+                            val jsonStr = ConfigManager.generateConfigJson(exportCfg)
+                            exportJsonStr = jsonStr
+                            showExportDialog = true
+                        },
+                        onImportConfig = {
+                            showImportDialog = true
+                        },
+                        senderWhitelist = senderWhitelist,
+                        onSenderWhitelistChange = { list ->
+                            senderWhitelist = list
+                            saveSenderFilterList(prefs, Constants.PREF_SENDER_WHITELIST, list)
+                            LogStore.append(context, "发送者白名单已更新，共 ${list.size} 条规则")
+                        },
+                        senderBlacklist = senderBlacklist,
+                        onSenderBlacklistChange = { list ->
+                            senderBlacklist = list
+                            saveSenderFilterList(prefs, Constants.PREF_SENDER_BLACKLIST, list)
+                            LogStore.append(context, "发送者黑名单已更新，共 ${list.size} 条规则")
+                        },
+                        contentWhitelist = contentWhitelist,
+                        onContentWhitelistChange = { list ->
+                            contentWhitelist = list
+                            saveSenderFilterList(prefs, Constants.PREF_CONTENT_WHITELIST, list)
+                            LogStore.append(context, "内容白名单已更新，共 ${list.size} 条规则")
+                        },
+                        contentBlacklist = contentBlacklist,
+                        onContentBlacklistChange = { list ->
+                            contentBlacklist = list
+                            saveSenderFilterList(prefs, Constants.PREF_CONTENT_BLACKLIST, list)
+                            LogStore.append(context, "内容黑名单已更新，共 ${list.size} 条规则")
+                        },
+                        onStartService = onStartService
+                    )
+                    4 -> LogTab(
+                        logs = logs,
+                        autoRefresh = logAutoRefresh,
+                        onRefresh = { logs = LogStore.readAll(context) },
+                        onClear = {
+                            LogStore.clear(context)
+                            logs = emptyList()
+                            Toast.makeText(context, "日志已清除", Toast.LENGTH_SHORT).show()
+                        },
+                        onAutoRefreshChange = { logAutoRefresh = it }
+                    )
+                }
+            }
+        }
+        }
+    }
+
+    // Edit Channel Dialog
+    if (showChannelDialog && editingChannel != null) {
+        ModernAlertDialog(
+            onDismissRequest = { showChannelDialog = false; editingChannel = null },
+            title = "编辑通道",
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedTextField(
+                        value = editChannelName,
+                        onValueChange = { editChannelName = it },
+                        label = { Text("通道名称") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    var editTypeExpanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = editTypeExpanded,
+                        onExpandedChange = { editTypeExpanded = !editTypeExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = getChannelTypeLabel(editChannelType),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("通道类型") },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(editTypeExpanded) },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = editTypeExpanded,
+                            onDismissRequest = { editTypeExpanded = false }
+                        ) {
+                            ChannelType.entries.forEach { t ->
+                                DropdownMenuItem(
+                                    text = { Text(getChannelTypeLabel(t)) },
+                                    onClick = {
+                                        editChannelType = t
+                                        editTypeExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = editChannelTarget,
+                        onValueChange = { editChannelTarget = it },
+                        label = { Text("Webhook 地址") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    if (editChannelType == ChannelType.GENERIC_WEBHOOK) {
+                        Text(
+                            text = "Bark 地址示例：https://api.day.app/你的Key/；删除复制地址中的示例标题和正文。消息模板填写普通文本。",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    // 测试转发按钮
+                    var testState by remember { mutableStateOf<TestSendState>(TestSendState.Idle) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                val url = editChannelTarget.trim()
+                                if (!WebhookSender.isValidUrl(url)) {
+                                    testState = TestSendState.Error("Webhook 地址格式无效")
+                                    return@OutlinedButton
+                                }
+                                testState = TestSendState.Sending
+                                // 后台线程发送
+                                kotlin.concurrent.thread {
+                                    val result = WebhookSender.sendTestMessage(url, editChannelType, editChannelName.trim())
+                                    testState = if (result.success) {
+                                        TestSendState.Success
+                                    } else {
+                                        TestSendState.Error(result.errorMessage.ifBlank { "发送失败" })
+                                    }
+                                }
+                            },
+                            enabled = testState != TestSendState.Sending && editChannelTarget.isNotBlank(),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            when (testState) {
+                                TestSendState.Idle -> Text("发送测试消息")
+                                TestSendState.Sending -> Text("发送中…")
+                                TestSendState.Success -> Text("✓ 发送成功")
+                                is TestSendState.Error -> Text("发送测试")
+                            }
+                        }
+                    }
+                    when (val s = testState) {
+                        is TestSendState.Error -> Text(
+                            text = "发送失败：${s.message}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        TestSendState.Success -> Text(
+                            text = "测试消息发送成功，请检查目标通道是否收到",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF10B981)
+                        )
+                        else -> {}
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 1.dp)
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 消息模板
+                    var templateExpanded by remember { mutableStateOf(false) }
+                    Text(
+                        text = "消息模板",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "自定义短信格式，留空使用短信默认模板；其他提醒请到设置中的“推送模板”修改。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = editChannelTemplate,
+                        onValueChange = { editChannelTemplate = it },
+                        label = { Text("消息模板") },
+                        placeholder = { Text("留空使用全局默认模板") },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        maxLines = 5
+                    )
+
+                    com.lanbing.smsforwarder.ui.TemplateVariablesMenu(
+                        MessageTemplateRenderer.getPlaceholderHints(),
+                        onInsert = { token -> editChannelTemplate = com.lanbing.smsforwarder.ui.insertTemplateVariable(editChannelTemplate, token) },
+                        tagPrefix = "channel-template-variables"
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 预置模板
+                    ExposedDropdownMenuBox(
+                        expanded = templateExpanded,
+                        onExpandedChange = { templateExpanded = !templateExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = "选择预置模板",
+                            onValueChange = {},
+                            readOnly = true,
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(templateExpanded) },
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true,
+                            leadingIcon = {
+                                Icon(Icons.Outlined.Autorenew, contentDescription = null)
+                            }
+                        )
+                        ExposedDropdownMenu(
+                            expanded = templateExpanded,
+                            onDismissRequest = { templateExpanded = false }
+                        ) {
+                            MessageTemplateRenderer.getPresetTemplates().forEach { (name, tpl) ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(name, fontWeight = FontWeight.Medium)
+                                            Text(
+                                                text = tpl.take(30) + if (tpl.length > 30) "…" else "",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        editChannelTemplate = TextFieldValue(tpl, TextRange(tpl.length))
+                                        templateExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    // 实时预览
+                    var previewExpanded by remember { mutableStateOf(true) }
+                    CollapsibleSection(
+                        title = "消息预览",
+                        expanded = previewExpanded,
+                        onToggle = { previewExpanded = !previewExpanded }
+                    ) {
+                        val previewText = remember(editChannelTemplate, editChannelName) {
+                            val params = MessageTemplateRenderer.TemplateParams(
+                                sender = "10086",
+                                content = "【中国移动】您本月已使用流量 3.2GB，剩余 6.8GB。",
+                                receiverPhone = "138****8888",
+                                verificationCode = "123456",
+                                matchedKeyword = "流量",
+                                channelName = editChannelName.ifBlank { "我的通道" }
+                            )
+                            if (editChannelTemplate.text.isBlank()) {
+                                "(使用默认格式)\n\n" + MessageTemplateRenderer.buildDefaultMessage(
+                                    params,
+                                    showSenderPhone = true,
+                                    highlightVerificationCode = true
+                                )
+                            } else {
+                                MessageTemplateRenderer.render(editChannelTemplate.text, params)
+                            }
+                        }
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text(
+                                text = previewText,
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier.padding(12.dp),
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val ch = editingChannel ?: return@Button
+                        val template = editChannelTemplate.text.trim().ifBlank { null }
+                        val updated = Channel(ch.id, editChannelName.trim(), editChannelType, editChannelTarget.trim(), template)
+                        channels = channels.map { if (it.id == ch.id) updated else it }
+                        saveChannels(prefs, channels)
+                        LogStore.append(context, "编辑通道: ${updated.name}")
+                        showChannelDialog = false
+                        editingChannel = null
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showChannelDialog = false; editingChannel = null }) { Text("取消") }
+            }
+        )
+    }
+
+    // Edit Config Dialog
+    if (showConfigDialog && editingConfig != null) {
+        ModernAlertDialog(
+            onDismissRequest = { showConfigDialog = false; editingConfig = null },
+            title = "编辑关键词配置",
+            content = {
+                Column(verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                    // ========== 基础设置 ==========
+                    SectionHeader("基础设置")
+
+                    // 启用开关
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text("启用规则", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            Text("关闭后此规则暂不生效", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = editConfigEnabled,
+                            onCheckedChange = { editConfigEnabled = it }
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 主关键词
+                    OutlinedTextField(
+                        value = editConfigKeyword,
+                        onValueChange = { editConfigKeyword = it },
+                        label = { Text("关键词") },
+                        placeholder = { Text("留空表示匹配所有短信") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 匹配模式
+                    var matchModeExpanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = matchModeExpanded,
+                        onExpandedChange = { matchModeExpanded = !matchModeExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = getMatchModeLabel(editConfigMatchMode),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("匹配模式") },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(matchModeExpanded) },
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+                        ExposedDropdownMenu(
+                            expanded = matchModeExpanded,
+                            onDismissRequest = { matchModeExpanded = false }
+                        ) {
+                            MatchMode.entries.forEach { mode ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(getMatchModeLabel(mode), fontWeight = FontWeight.Medium)
+                                            Text(
+                                                text = getMatchModeDescription(mode),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        editConfigMatchMode = mode
+                                        matchModeExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 转发通道
+                    var editCfgExpanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = editCfgExpanded,
+                        onExpandedChange = { editCfgExpanded = !editCfgExpanded }
+                    ) {
+                        OutlinedTextField(
+                            value = channels.find { it.id == editConfigChannelId }?.name ?: "选择通道",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("转发到通道") },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(editCfgExpanded) },
+                            shape = RoundedCornerShape(12.dp),
+                            singleLine = true
+                        )
+                        ExposedDropdownMenu(
+                            expanded = editCfgExpanded,
+                            onDismissRequest = { editCfgExpanded = false }
+                        ) {
+                            channels.forEach { ch ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(ch.name, fontWeight = FontWeight.Medium)
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                getChannelTypeLabel(ch.type),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        editConfigChannelId = ch.id
+                                        editCfgExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // ========== 高级设置（可折叠）==========
+                    var advancedExpanded by remember { mutableStateOf(false) }
+                    CollapsibleSection(
+                        title = "高级设置",
+                        expanded = advancedExpanded,
+                        onToggle = { advancedExpanded = !advancedExpanded }
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // 多关键词组合逻辑
+                            var matchLogicExpanded by remember { mutableStateOf(false) }
+                            ExposedDropdownMenuBox(
+                                expanded = matchLogicExpanded,
+                                onExpandedChange = { matchLogicExpanded = !matchLogicExpanded }
+                            ) {
+                                OutlinedTextField(
+                                    value = getMatchLogicLabel(editConfigMatchLogic),
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("多关键词逻辑") },
+                                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(matchLogicExpanded) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    singleLine = true
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = matchLogicExpanded,
+                                    onDismissRequest = { matchLogicExpanded = false }
+                                ) {
+                                    MatchLogic.entries.forEach { logic ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Column {
+                                                    Text(getMatchLogicLabel(logic), fontWeight = FontWeight.Medium)
+                                                    Text(
+                                                        text = getMatchLogicDescription(logic),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            },
+                                            onClick = {
+                                                editConfigMatchLogic = logic
+                                                matchLogicExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 额外关键词（逐个添加 + Chip 列表）
+                            val extraKws = remember {
+                                androidx.compose.runtime.mutableStateListOf<String>().apply {
+                                    addAll(editConfigExtraKeywords.lines().map { it.trim() }.filter { it.isNotBlank() })
+                                }
+                            }
+                            var newKw by remember { mutableStateOf("") }
+                            Text(
+                                "额外关键词（${extraKws.size} 个）",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = newKw,
+                                    onValueChange = { newKw = it },
+                                    label = { Text("添加关键词") },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(12.dp),
+                                    singleLine = true,
+                                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                                        onDone = {
+                                            val kw = newKw.trim()
+                                            if (kw.isNotBlank() && kw !in extraKws) {
+                                                extraKws.add(kw)
+                                                newKw = ""
+                                            }
+                                        }
+                                    )
+                                )
+                                Button(
+                                    onClick = {
+                                        val kw = newKw.trim()
+                                        if (kw.isNotBlank() && kw !in extraKws) {
+                                            extraKws.add(kw)
+                                            newKw = ""
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("添加")
+                                }
+                            }
+                            // 已添加列表（一行一个，完整显示，美化样式）
+                            if (extraKws.isNotEmpty()) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 40.dp, max = 200.dp)
+                                        .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    extraKws.forEachIndexed { index, kw ->
+                                        Surface(
+                                            onClick = { extraKws.removeAt(index) },
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f),
+                                            border = androidx.compose.foundation.BorderStroke(
+                                                1.dp,
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                            ),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                // 序号标签
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                                                    modifier = Modifier.size(22.dp)
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Text(
+                                                            text = "${index + 1}",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                            color = MaterialTheme.colorScheme.primary
+                                                        )
+                                                    }
+                                                }
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Text(
+                                                    text = kw,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                // 删除按钮
+                                                Surface(
+                                                    shape = RoundedCornerShape(6.dp),
+                                                    color = MaterialTheme.colorScheme.error.copy(alpha = 0.1f),
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Box(contentAlignment = Alignment.Center) {
+                                                        Icon(
+                                                            Icons.Outlined.Close,
+                                                            contentDescription = "删除",
+                                                            tint = MaterialTheme.colorScheme.error,
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                Surface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                    shape = RoundedCornerShape(10.dp),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f)
+                                    )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(14.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Label,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            text = "仅使用主关键词",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                            Text(
+                                text = when (editConfigMatchLogic) {
+                                    MatchLogic.OR -> "OR 模式：主关键词或额外关键词任一命中即匹配"
+                                    MatchLogic.AND -> "AND 模式：主关键词和所有额外关键词都必须同时命中才匹配"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            // 同步 extraKws 到 editConfigExtraKeywords（每次重组后同步）
+                            androidx.compose.runtime.SideEffect {
+                                editConfigExtraKeywords = extraKws.joinToString("\n")
+                            }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant, thickness = 1.dp)
+
+                            // 发送者过滤
+                            Text("发送者过滤", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                            OutlinedTextField(
+                                value = editConfigSenderPattern,
+                                onValueChange = { editConfigSenderPattern = it },
+                                label = { Text("发送者规则") },
+                                placeholder = { Text("留空不过滤") },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                singleLine = true
+                            )
+
+                            var senderModeExpanded by remember { mutableStateOf(false) }
+                            ExposedDropdownMenuBox(
+                                expanded = senderModeExpanded,
+                                onExpandedChange = { senderModeExpanded = !senderModeExpanded }
+                            ) {
+                                OutlinedTextField(
+                                    value = getSenderMatchModeLabel(editConfigSenderMatchMode),
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("发送者匹配模式") },
+                                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(senderModeExpanded) },
+                                    shape = RoundedCornerShape(12.dp),
+                                    singleLine = true
+                                )
+                                ExposedDropdownMenu(
+                                    expanded = senderModeExpanded,
+                                    onDismissRequest = { senderModeExpanded = false }
+                                ) {
+                                    SenderMatchMode.entries.forEach { mode ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Column {
+                                                    Text(getSenderMatchModeLabel(mode), fontWeight = FontWeight.Medium)
+                                                    Text(
+                                                        text = getSenderMatchModeDescription(mode),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                            },
+                                            onClick = {
+                                                editConfigSenderMatchMode = mode
+                                                senderModeExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // ========== 匹配测试（可折叠，默认展开）==========
+                    var testExpanded by remember { mutableStateOf(true) }
+                    var testContent by remember { mutableStateOf("【建设银行】您的验证码是 123456，5 分钟内有效") }
+                    var testSender by remember { mutableStateOf("95533") }
+                    CollapsibleSection(
+                        title = "匹配测试",
+                        expanded = testExpanded,
+                        onToggle = { testExpanded = !testExpanded }
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = testSender,
+                                onValueChange = { testSender = it },
+                                label = { Text("测试发送者") },
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                singleLine = true
+                            )
+                            OutlinedTextField(
+                                value = testContent,
+                                onValueChange = { testContent = it },
+                                label = { Text("测试短信内容") },
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                maxLines = 4
+                            )
+
+                            // 实时匹配结果
+                            val testResult = remember(editConfigKeyword, editConfigMatchMode, editConfigMatchLogic, editConfigExtraKeywords, editConfigSenderPattern, editConfigSenderMatchMode, editConfigEnabled, testContent, testSender) {
+                                val extraList = editConfigExtraKeywords.split("\n").map { it.trim() }.filter { it.isNotBlank() }
+                                val testCfg = KeywordConfig(
+                                    id = "test",
+                                    keyword = editConfigKeyword.trim(),
+                                    channelId = "",
+                                    matchMode = editConfigMatchMode,
+                                    matchLogic = editConfigMatchLogic,
+                                    extraKeywords = extraList,
+                                    senderPattern = editConfigSenderPattern.takeIf { it.isNotBlank() },
+                                    senderMatchMode = editConfigSenderMatchMode,
+                                    enabled = editConfigEnabled
+                                )
+                                MessageMatcher.matches(testCfg, testContent, testSender)
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (testResult) Icons.Outlined.CheckCircle else Icons.Outlined.Cancel,
+                                    contentDescription = null,
+                                    tint = if (testResult) Color(0xFF10B981) else MaterialTheme.colorScheme.error
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (testResult) "匹配成功 — 此短信会被转发" else "不匹配 — 此短信不会被转发",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (testResult) Color(0xFF10B981) else MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cfg = editingConfig ?: return@Button
+                        if (editConfigChannelId.isBlank()) {
+                            Toast.makeText(context, "请选择通道", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        val extraList = editConfigExtraKeywords
+                            .split("\n")
+                            .map { it.trim() }
+                            .filter { it.isNotBlank() }
+                        val senderPattern = editConfigSenderPattern.trim().ifBlank { null }
+                        val updated = KeywordConfig(
+                            id = cfg.id,
+                            keyword = editConfigKeyword.trim(),
+                            channelId = editConfigChannelId,
+                            matchMode = editConfigMatchMode,
+                            matchLogic = editConfigMatchLogic,
+                            extraKeywords = extraList,
+                            senderPattern = senderPattern,
+                            senderMatchMode = editConfigSenderMatchMode,
+                            enabled = editConfigEnabled
+                        )
+                        configs = configs.map { if (it.id == cfg.id) updated else it }
+                        saveConfigs(prefs, configs)
+                        LogStore.append(context, "编辑关键词: ${updated.keyword} -> ${channels.find { it.id == updated.channelId }?.name}")
+                        showConfigDialog = false
+                        editingConfig = null
+                    },
+                    shape = RoundedCornerShape(12.dp)
+                ) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfigDialog = false; editingConfig = null }) { Text("取消") }
+            }
+        )
+    }
+
+    // Test Dialog
+    if (showTestDialog) {
+        TestRuleDialog(
+            channels = channels,
+            configs = configs,
+            onDismiss = { showTestDialog = false }
+        )
+    }
+
+    // 关于对话框
+    if (showAboutDialog) {
+        AboutDialog(
+            onDismiss = { showAboutDialog = false }
+        )
+    }
+    
+    // 开机自启动提示对话框
+    if (showBootTipDialog) {
+        val ctx = LocalContext.current
+        ModernAlertDialog(
+            onDismissRequest = { showBootTipDialog = false },
+            title = "重要提示",
+            content = {
+                Text(
+                    text = "要让开机自启动正常工作，您还需要在系统设置中开启应用的自启动权限。\n\n通常在：设置 → 应用管理 → 短信转发助手 → 权限管理/自启动管理",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showBootTipDialog = false }) {
+                    Text("我知道了")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showBootTipDialog = false
+                    try {
+                        val intent = Intent().apply {
+                            action = "android.settings.APPLICATION_DETAILS_SETTINGS"
+                            data = Uri.fromParts("package", ctx.packageName, null)
+                        }
+                        ctx.startActivity(intent)
+                    } catch (_: Exception) {
+                        Toast.makeText(ctx, "请手动打开系统设置", Toast.LENGTH_SHORT).show()
+                    }
+                }) {
+                    Text("去设置")
+                }
+            }
+        )
+    }
+
+    // 快速创建引导对话框
+    if (showQuickSetupDialog) {
+        val ctx = LocalContext.current
+        QuickSetupDialog(
+            onDismiss = { showQuickSetupDialog = false },
+            onComplete = { channelType, webhookUrl, channelName, keyword ->
+                showQuickSetupDialog = false
+
+                // 1. 处理通道名称重名，自动加序号
+                val existingNames = channels.map { it.name }
+                var finalName = channelName
+                var suffix = 2
+                while (finalName in existingNames) {
+                    finalName = "$channelName $suffix"
+                    suffix++
+                }
+
+                // 2. 创建通道
+                val channelId = UUID.randomUUID().toString()
+                val newChannel = Channel(
+                    id = channelId,
+                    name = finalName,
+                    type = channelType,
+                    target = webhookUrl
+                )
+                val updatedChannels = channels + newChannel
+                ChannelLoader.saveChannels(prefs, updatedChannels)
+                channels = updatedChannels
+
+                // 3. 创建关键词规则
+                val configId = UUID.randomUUID().toString()
+                val newConfig = KeywordConfig(
+                    id = configId,
+                    keyword = keyword,
+                    channelId = channelId
+                )
+                val updatedConfigs = configs + newConfig
+                ChannelLoader.saveConfigs(prefs, updatedConfigs)
+                configs = updatedConfigs
+
+                LogStore.append(
+                    ctx,
+                    "快速创建完成：通道「${finalName}」+ 关键词「${if (keyword.isBlank()) "全部转发" else keyword}」"
+                )
+
+                // 4. 弹出提示
+                Toast.makeText(ctx, "配置成功！可以开启转发服务了", Toast.LENGTH_LONG).show()
+            }
+        )
+    }
+
+    // 权限说明对话框
+    if (showPermissionDialog) {
+        val ctx = LocalContext.current
+        PermissionExplanationDialog(
+            onDismiss = { showPermissionDialog = false },
+            onGoToSettings = {
+                showPermissionDialog = false
+                try {
+                    val intent = Intent().apply {
+                        action = "android.settings.APPLICATION_DETAILS_SETTINGS"
+                        data = Uri.fromParts("package", ctx.packageName, null)
+                    }
+                    ctx.startActivity(intent)
+                } catch (_: Exception) {
+                    Toast.makeText(ctx, "请手动打开系统设置", Toast.LENGTH_SHORT).show()
+                }
+            }
+        )
+    }
+    
+    // 隐私政策弹窗
+    if (showPrivacyDialog) {
+        val isPrivacyRequired = !prefs.getBoolean(Constants.PREF_PRIVACY_AGREED, false)
+        PrivacyPolicyDialog(
+            onAgree = {
+                showPrivacyDialog = false
+                if (isPrivacyRequired) {
+                    prefs.edit().putBoolean(Constants.PREF_PRIVACY_AGREED, true).apply()
+                }
+            },
+            onDisagree = {
+                (context as Activity).finish()
+            },
+            isViewOnly = !isPrivacyRequired
+        )
+    }
+
+    // 导出配置弹窗
+    if (showExportDialog) {
+        Dialog(onDismissRequest = { showExportDialog = false }) {
+            LiquidCard(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = GlassShapes.container,
+                elevation = CardDefaults.cardElevation(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        "导出配置",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "配置内容已生成，选择一种方式导出：",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Button(
+                        onClick = {
+                            val exportCfg = ExportConfig(
+                                channels = channels,
+                                keywordConfigs = configs,
+                                showReceiverPhone = showReceiverPhone,
+                                showSenderPhone = showSenderPhone,
+                                highlightVerificationCode = highlightVerificationCode,
+                                globalMessageTemplate = globalMessageTemplate,
+                                pushTemplates = PushTemplates.readMap(prefs, Constants.PREF_PUSH_TEMPLATES),
+                                appNotificationTemplates = PushTemplates.readMap(prefs, Constants.PREF_APP_PUSH_TEMPLATES),
+                                contactNameEnabled = prefs.getBoolean(Constants.PREF_CONTACT_NAME_ENABLED, false),
+                                batteryStepReminderEnabled = prefs.getBoolean(Constants.PREF_BATTERY_STEP_ENABLED, false),
+                                batteryReminderEnabled = batteryReminderEnabled,
+                                lowBatteryReminderEnabled = lowBatteryReminderEnabled,
+                                highBatteryReminderEnabled = highBatteryReminderEnabled,
+                                chargingReminderEnabled = chargingReminderEnabled,
+                                batteryReminderChannelId = batteryReminderChannelId,
+                                lowBatteryThreshold = lowBatteryThreshold,
+                                highBatteryThreshold = highBatteryThreshold,
+                                customSim1Phone = customSim1Phone,
+                                customSim2Phone = customSim2Phone,
+                                startOnBoot = startOnBoot,
+                                senderWhitelist = senderWhitelist,
+                                senderBlacklist = senderBlacklist,
+                                contentWhitelist = contentWhitelist,
+                                contentBlacklist = contentBlacklist,
+                                callReminderEnabled = prefs.getBoolean(Constants.PREF_CALL_REMINDER_ENABLED, false),
+                                missedCallReminderEnabled = prefs.getBoolean(Constants.PREF_MISSED_CALL_REMINDER_ENABLED, false),
+                                callReminderChannelId = prefs.getString(Constants.PREF_CALL_REMINDER_CHANNEL_ID, null),
+                                signalReminderEnabled = prefs.getBoolean(Constants.PREF_SIGNAL_REMINDER_ENABLED, false),
+                                signalReminderChannelId = prefs.getString(Constants.PREF_SIGNAL_CHANNEL_ID, null),
+                                signalSendInitial = prefs.getBoolean(Constants.PREF_SIGNAL_SEND_INITIAL, true),
+                                signalPauseDuringCalls = prefs.getBoolean(Constants.PREF_SIGNAL_PAUSE_DURING_CALLS, true),
+                                appNotificationEnabled = prefs.getBoolean(Constants.PREF_APP_NOTIFICATION_ENABLED, false),
+                                appNotificationPackages = com.lanbing.smsforwarder.utils.NotificationSettings.selectedPackages(prefs).sorted(),
+                                appNotificationChannelId = prefs.getString(Constants.PREF_APP_NOTIFICATION_CHANNEL_ID, null),
+                                appNotificationSkipPhoneSms = prefs.getBoolean(Constants.PREF_APP_NOTIFICATION_SKIP_PHONE_SMS, true),
+                                appNotificationSkipOngoing = prefs.getBoolean(Constants.PREF_APP_NOTIFICATION_SKIP_ONGOING, true)
+                            )
+                            ConfigManager.exportConfig(context, exportCfg)
+                            showExportDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp)
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("分享文件", fontSize = 16.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("短信转发配置", exportJsonStr)
+                            clipboard.setPrimaryClip(clip)
+                            Toast.makeText(context, "配置已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                            showExportDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp)
+                    ) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("复制文本", fontSize = 16.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            try {
+                                saveConfigToDownloads(context, exportJsonStr)
+                                Toast.makeText(context, "已保存到系统下载目录", Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "保存失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                            showExportDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp)
+                    ) {
+                        Icon(Icons.Filled.Download, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("保存到下载", fontSize = 16.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Text(
+                        "💡 配置文件包含所有通道、规则和设置，可用于备份或迁移到其他设备",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    TextButton(
+                        onClick = { showExportDialog = false },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("关闭", fontSize = 16.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    // 导入配置弹窗
+    if (showImportDialog) {
+        Dialog(onDismissRequest = { showImportDialog = false }) {
+            LiquidCard(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = GlassShapes.container,
+                elevation = CardDefaults.cardElevation(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        "导入配置",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        "选择一种导入方式：",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    Button(
+                        onClick = {
+                            showImportDialog = false
+                            onImportFromFile()
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp)
+                    ) {
+                        Icon(Icons.Filled.FolderOpen, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("从文件选择", fontSize = 16.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            showImportDialog = false
+                            showPasteDialog = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 12.dp)
+                    ) {
+                        Icon(Icons.Filled.ContentPaste, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("粘贴文本导入", fontSize = 16.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    TextButton(
+                        onClick = { showImportDialog = false },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("取消", fontSize = 16.sp)
+                    }
+                }
+            }
+        }
+    }
+
+    // 粘贴文本弹窗
+    if (showPasteDialog) {
+        Dialog(onDismissRequest = { showPasteDialog = false }) {
+            LiquidCard(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                shape = GlassShapes.container,
+                elevation = CardDefaults.cardElevation(8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        "粘贴配置文本",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "将导出的配置文本粘贴到下方输入框",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = pasteText,
+                        onValueChange = { pasteText = it },
+                        label = { Text("配置文本") },
+                        modifier = Modifier.fillMaxWidth().height(180.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        maxLines = 10
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { showPasteDialog = false },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("取消")
+                        }
+                        Button(
+                            onClick = {
+                                if (pasteText.isNotBlank()) {
+                                    val text = pasteText
+                                    pasteText = ""
+                                    showPasteDialog = false
+                                    onPasteImport(text)
+                                } else {
+                                    Toast.makeText(context, "请粘贴配置文本", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text("确认导入")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // 导入配置预览弹窗
+    if (showImportPreviewDialog && pendingImportData != null) {
+        ImportPreviewDialog(
+            jsonStr = pendingImportData!!,
+            onConfirm = onConfirmImport,
+            onDismiss = onDismissPreviewDialog
+        )
+    }
+}
+
+@Composable
+fun ImportPreviewDialog(
+    jsonStr: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    var parsedConfig by remember { mutableStateOf<org.json.JSONObject?>(null) }
+    var parseError by remember { mutableStateOf(false) }
+
+    remember(jsonStr) {
+        try {
+            parsedConfig = org.json.JSONObject(jsonStr)
+            parseError = false
+        } catch (_: Exception) {
+            parseError = true
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        LiquidCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = GlassShapes.container,
+            elevation = CardDefaults.cardElevation(8.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = "确认导入配置",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (parseError) {
+                    Text(
+                        text = "配置内容无法解析为有效的格式",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Red
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = jsonStr.take(200) + if (jsonStr.length > 200) "..." else "",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 5
+                    )
+                } else {
+                    Text(
+                        text = "以下是将要导入的配置内容，请确认：",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    LiquidCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            parsedConfig?.let { config ->
+                                val channels = config.optJSONArray("channels")
+                                val configs = config.optJSONArray("keywordConfigs")
+                                val batteryReminder = config.optBoolean("batteryReminderEnabled", false)
+                                val chargingReminder = config.optBoolean("chargingReminderEnabled", false)
+                                val lowBatteryThreshold = config.optInt("lowBatteryThreshold", 20)
+                                val highBatteryThreshold = config.optInt("highBatteryThreshold", 80)
+
+                                ImportPreviewItem(label = "转发通道", value = "${channels?.length() ?: 0} 个")
+                                ImportPreviewItem(label = "转发规则", value = "${configs?.length() ?: 0} 条")
+                                ImportPreviewItem(label = "通讯录姓名", value = if (config.optBoolean("contactNameEnabled", false)) "已开启（需本机授权）" else "已关闭")
+                                ImportPreviewItem(label = "每10%电量提醒", value = if (config.optBoolean("batteryStepReminderEnabled", false)) "已开启" else "已关闭")
+                                ImportPreviewItem(label = "电量提醒", value = if (batteryReminder) "已开启" else "已关闭")
+                                ImportPreviewItem(label = "充电提醒", value = if (chargingReminder) "已开启" else "已关闭")
+                                ImportPreviewItem(label = "低电量阈值", value = "$lowBatteryThreshold%")
+                                ImportPreviewItem(label = "高电量阈值", value = "$highBatteryThreshold%")
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "⚠️ 导入将覆盖当前所有配置",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFFE67E22),
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("取消")
+                    }
+                    Button(
+                        onClick = onConfirm,
+                        enabled = !parseError,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("确认导入")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ImportPreviewItem(label: String, value: String) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+    }
+}
+
+@Composable
+fun PermissionExplanationDialog(
+    onDismiss: () -> Unit,
+    onGoToSettings: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        LiquidCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = GlassShapes.container,
+            elevation = CardDefaults.cardElevation(8.dp)
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Filled.Security,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    "需要权限",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "短信转发助手需要以下权限才能正常工作：\n\n• 短信权限：用于接收并识别短信内容\n• 通知权限：用于显示服务运行状态和提醒\n\n请在系统设置中开启这些权限。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) { Text("稍后") }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = onGoToSettings,
+                        shape = RoundedCornerShape(12.dp)
+                    ) { Text("去设置") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun PrivacyPolicyDialog(
+    onAgree: () -> Unit,
+    onDisagree: () -> Unit,
+    isViewOnly: Boolean = false
+) {
+    Dialog(
+        onDismissRequest = { if (isViewOnly) onAgree() },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Column(modifier = Modifier
+                .fillMaxHeight()
+                .systemBarsPadding()
+            ) {
+                Column(modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 16.dp)) {
+                    Text(
+                        "隐私政策",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "最后更新时间：2026年7月22日",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                
+                PolicyScrollableColumn(modifier = Modifier.weight(1f)) {
+                    PolicySection(title = "概述") {
+                        Text(
+                            "短信转发助手（以下简称\"我们\"）非常重视用户的隐私保护。本隐私政策说明了我们如何收集、使用、存储和保护您的个人信息。使用我们的应用即表示您同意本政策中描述的做法。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            lineHeight = 22.sp
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        PolicyBullet("应用名称：短信转发助手")
+                        PolicyBullet("开发者：华昊科技有限公司")
+                        PolicyBullet("联系邮箱：support@smsforwarder.cn")
+                        PolicyBullet("官方网站：https://smsforwarder.cn/")
+                        PolicyBullet("备案号：鲁ICP备2026018166号-2A")
+                    }
+                    
+                    PolicySection(title = "核心原则") {
+                        PolicyBullet("不上云：所有数据都在您的手机本地处理，不会上传到我们的服务器")
+                        PolicyBullet("不收集：不会收集您的个人信息、短信内容等敏感数据")
+                        PolicyBullet("不追踪：不集成任何统计、分析或广告 SDK")
+                        PolicyBullet("完全可控：所有权限和数据都由您自己掌控")
+                    }
+                    
+                    PolicySection(title = "信息收集与使用") {
+                        Text(
+                            "*短信内容（敏感信息）",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        Text("用途：仅在您的手机本地用于匹配关键词规则和执行转发", style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+                        Text("存储：不会保存到任何服务器，仅在转发时临时处理", style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                .padding(16.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                        ) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Icon(
+                                    Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    "重要：唯一会发送短信内容的情况是您主动配置了 Webhook 转发目标（如企业微信、钉钉、飞书或自定义 Webhook），应用会将短信直接发送到您指定的目标，不会经过我们的服务器。",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    lineHeight = 20.sp
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Text(
+                            "配置信息",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        Text("您设置的转发通道、关键词规则等配置信息保存在您手机的本地存储中，不会上传。", style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+                        
+                        Spacer(modifier = Modifier.height(8.dp))
+                        
+                        Text(
+                            "转发日志",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        Text("应用会在本地记录转发历史（最多200条），方便您查看和调试，这些日志仅存储在您的手机上。", style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+                    }
+                    
+                    PolicySection(title = "权限说明") {
+                        PolicyBullet("接收短信权限：监听设备收到的短信，用于执行转发功能")
+                        PolicyBullet("通知权限：显示前台服务通知，让您知道服务正在运行")
+                        PolicyBullet("读取手机状态权限：用于识别双卡手机的 SIM 卡信息和获取本机号码（可选）")
+                        PolicyBullet("网络权限：仅用于转发到您配置的 Webhook")
+                        PolicyBullet("前台服务权限：保持应用在后台稳定运行")
+                        PolicyBullet("开机自启权限：让应用在开机后自动启动转发服务（可选）")
+                        PolicyBullet("忽略电池优化权限：防止系统杀死后台服务（可选）")
+                        PolicyBullet("访问网络状态权限：检测网络连接状态")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("所有权限都需要您主动授权，您可以随时在系统设置中撤销。", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    
+                    PolicySection(title = "数据存储") {
+                        Text(
+                            "本地存储",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        Text("所有数据都存储在您手机的私有目录中，包括：", style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        PolicyBullet("转发通道和关键词配置")
+                        PolicyBullet("转发历史日志")
+                        PolicyBullet("应用设置")
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Text(
+                            "服务器存储",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF22C55E).copy(alpha = 0.08f))
+                                .padding(16.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                        ) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Icon(
+                                    Icons.Filled.CheckCircle,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = Color(0xFF22C55E)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    "我们没有服务器存储您的数据！应用是纯本地运行的工具，我们不收集、不存储、不上传任何用户数据。",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    lineHeight = 20.sp
+                                )
+                            }
+                        }
+                    }
+                    
+                    PolicySection(title = "您的权利") {
+                        PolicyBullet("查看数据：可以在应用内查看所有转发日志")
+                        PolicyBullet("删除数据：可以在应用内清空日志，或卸载应用删除所有数据")
+                        PolicyBullet("控制权限：可以在系统设置中随时授予或撤销权限")
+                        PolicyBullet("撤回同意：可以在应用设置中撤回隐私政策同意")
+                    }
+                    
+                    PolicySection(title = "第三方服务") {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                .padding(16.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                        ) {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Icon(
+                                    Icons.Filled.Link,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    "关于转发目标：如果您配置了 Webhook 或其他第三方服务作为转发目标，短信内容会发送到该第三方。请您谨慎选择转发目标，并确保了解其隐私政策。我们不对第三方的数据处理负责。",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    lineHeight = 20.sp
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Text(
+                            "第三方 SDK",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                        Text("当前版本未集成任何第三方 SDK（包括统计、广告、崩溃分析等）。", style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+                    }
+                    
+                    PolicySection(title = "政策更新") {
+                        Text("我们可能会不时更新本隐私政策。重大变更时，我们会通过应用内通知或其他方式告知您。建议您定期查看本政策以了解最新信息。", style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+                    }
+                    
+                    PolicySection(title = "联系我们") {
+                        Text("如果您对本隐私政策有任何疑问或建议，请通过以下方式联系我们：", style = MaterialTheme.typography.bodyMedium, lineHeight = 20.sp)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Mail, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("support@smsforwarder.cn", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                        }
+                    }
+                }
+                
+                HorizontalDivider(color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.1f))
+                
+                Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp)) {
+                    if (isViewOnly) {
+                        Button(
+                            onClick = onAgree,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(vertical = 14.dp)
+                        ) { Text("关闭", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Button(
+                                onClick = onAgree,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 14.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
+                                )
+                            ) { Text("同意", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+                            OutlinedButton(
+                                onClick = onDisagree,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 14.dp),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f))
+                            ) { Text("不同意", fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PolicyScrollableColumn(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    val scrollState = rememberScrollState()
+    Column(
+        modifier = modifier
+            .verticalScroll(scrollState)
+            .padding(horizontal = 24.dp)
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun PolicySection(title: String, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.padding(bottom = 24.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.padding(bottom = 10.dp)
+        )
+        content()
+    }
+}
+
+@Composable
+private fun PolicySubtitle(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(top = 14.dp, bottom = 8.dp)
+    )
+}
+
+@Composable
+private fun PolicyBullet(text: String) {
+    Row(modifier = Modifier.padding(bottom = 8.dp)) {
+        Text(
+            "• ",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Text(
+            text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            lineHeight = 22.sp
+        )
+    }
+}
+
+@Composable
+fun ModernAlertDialog(
+    onDismissRequest: () -> Unit,
+    title: String,
+    content: @Composable ColumnScope.() -> Unit,
+    confirmButton: @Composable () -> Unit,
+    dismissButton: @Composable () -> Unit
+) {
+    Dialog(onDismissRequest = onDismissRequest) {
+        LiquidCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
+            shape = GlassShapes.container,
+            elevation = CardDefaults.cardElevation(8.dp)
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                // 内容区域：可滚动，占满剩余空间但不超过屏幕高度
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    content()
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    dismissButton()
+                    Spacer(modifier = Modifier.width(8.dp))
+                    confirmButton()
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+}
+
+
+
+@Composable
+fun LogTab(
+    logs: List<String>,
+    autoRefresh: Boolean = true,
+    refreshIntervalMs: Long = 2000,
+    onRefresh: () -> Unit,
+    onClear: () -> Unit,
+    onAutoRefreshChange: ((Boolean) -> Unit)? = null
+) {
+    val pageInsets = LocalGlassInsets.current
+    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
+    var foreground by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)) }
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, _ ->
+            foreground = lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
+    val refresh by androidx.compose.runtime.rememberUpdatedState(onRefresh)
+    androidx.compose.runtime.LaunchedEffect(autoRefresh, foreground, refreshIntervalMs) {
+        if (autoRefresh && foreground) while (true) {
+            refresh()
+            delay(refreshIntervalMs)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(start = 16.dp, top = pageInsets.calculateTopPadding() + 16.dp, end = 16.dp, bottom = pageInsets.calculateBottomPadding() + 16.dp)
+    ) {
+        ModernCard(
+            modifier = Modifier.weight(1f).testTag("log-panel")
+        ) {
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                LogPanelHeader(logs.size, autoRefresh, onRefresh, onClear, onAutoRefreshChange)
+
+                Spacer(modifier = Modifier.height(16.dp))
+                if (logs.isEmpty()) {
+                    Box(
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(
+                                Icons.Outlined.Description,
+                                contentDescription = null,
+                                modifier = Modifier.size(64.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                "暂无日志",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth().testTag("log-list"), contentPadding = PaddingValues(bottom = 8.dp)) {
+                        items(logs) { line ->
+                            LogItem(line = line)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ModernCard(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    LiquidCard(modifier.fillMaxWidth(), onClick = onClick, content = content)
+}
+
+@Composable
+fun PermissionItem(
+    icon: ImageVector,
+    title: String,
+    granted: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (granted) Color(0xFF10B981).copy(alpha = 0.1f) else MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+            .padding(12.dp)
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            tint = if (granted) Color(0xFF10B981) else MaterialTheme.colorScheme.error
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                if (granted) "已授权" else "未授权",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (granted) {
+            Icon(
+                Icons.Filled.CheckCircle,
+                contentDescription = "已授权",
+                tint = Color(0xFF10B981)
+            )
+        } else {
+            TextButton(
+                onClick = onClick,
+                shape = RoundedCornerShape(8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Text("去设置")
+                Icon(Icons.Filled.ChevronRight, contentDescription = null, modifier = Modifier.size(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun ConfigItem(
+    config: KeywordConfig,
+    channelName: String,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    LiquidCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (config.enabled)
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+            else
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (config.enabled)
+                            Color(0xFF10B981).copy(alpha = 0.2f)
+                        else
+                            Color(0xFF9CA3AF).copy(alpha = 0.2f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (config.enabled) Icons.AutoMirrored.Filled.Rule else Icons.Outlined.Block,
+                    contentDescription = null,
+                    tint = if (config.enabled) Color(0xFF10B981) else Color(0xFF9CA3AF),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    if (config.keyword.isBlank()) "全部消息" else config.keyword,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = if (config.enabled) Color.Unspecified else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = getMatchModeLabel(config.matchMode),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (config.extraKeywords.isNotEmpty()) {
+                        Text(
+                            text = "  ·  +${config.extraKeywords.size} 关键词",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (config.senderPattern != null) {
+                        Text(
+                            text = "  ·  发送者过滤",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                Text(
+                    "→ $channelName",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(Icons.Filled.Edit, contentDescription = "编辑")
+            }
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@Composable
+fun ChannelItem(
+    name: String,
+    type: String,
+    target: String,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    LiquidCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val channelColor = when (type) {
+                "企业微信" -> Color(0xFF07C160)
+                "钉钉" -> Color(0xFF2080F0)
+                "飞书" -> Color(0xFF2064E5)
+                else -> MaterialTheme.colorScheme.primary
+            }
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(channelColor.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Filled.Cloud,
+                    contentDescription = null,
+                    tint = channelColor,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    "$type → ${target.take(30)}${if (target.length > 30) "..." else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(Icons.Filled.Edit, contentDescription = "编辑")
+            }
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(Icons.Filled.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+}
+
+@Composable
+fun LogItem(line: String) {
+    val tsRegex = """^\[(.*?)\]\s*(.*)$""".toRegex()
+    val match = tsRegex.find(line)
+    val time = match?.groups?.get(1)?.value ?: ""
+    val msg = match?.groups?.get(2)?.value ?: line
+    val isSuccess = msg.contains("成功") || msg.contains("已启动")
+    val isError = msg.contains("失败") || msg.contains("异常") || msg.contains("错误")
+    val iconTint = when {
+        isSuccess -> Color(0xFF10B981)
+        isError -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.primary
+    }
+    val bgColor = when {
+        isSuccess -> Color(0xFF10B981).copy(alpha = 0.05f)
+        isError -> MaterialTheme.colorScheme.error.copy(alpha = 0.05f)
+        else -> Color.Transparent
+    }
+    LogMessageLayout(
+        message = msg,
+        time = time,
+        markerTint = iconTint,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(bgColor)
+            .padding(vertical = 12.dp, horizontal = 4.dp)
+    )
+}
+
+@Composable
+fun TestRuleDialog(
+    channels: List<Channel>,
+    configs: List<KeywordConfig>,
+    onDismiss: () -> Unit
+) {
+    var testContent by remember { mutableStateOf("") }
+    var testResults by remember { mutableStateOf<List<Pair<Channel, KeywordConfig>>>(emptyList()) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        LiquidCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            shape = GlassShapes.container,
+            elevation = CardDefaults.cardElevation(8.dp)
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                brush = Brush.linearGradient(
+                                    colors = listOf(MaterialTheme.colorScheme.tertiary, Color(0xFFD97706))
+                                )
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.Science,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            "测试转发规则",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "输入短信内容测试匹配",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+
+                OutlinedTextField(
+                    value = testContent,
+                    onValueChange = {
+                        testContent = it
+                        testResults = if (it.isNotBlank()) {
+                            configs.mapNotNull { cfg ->
+                                val kw = cfg.keyword.trim()
+                                val match = if (kw.isEmpty()) true else it.contains(kw, ignoreCase = true)
+                                if (match) {
+                                    channels.find { ch -> ch.id == cfg.channelId }?.let { ch ->
+                                        ch to cfg
+                                    }
+                                } else null
+                            }
+                        } else emptyList()
+                    },
+                    label = { Text("输入测试短信内容") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 4,
+                    shape = RoundedCornerShape(16.dp)
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Text(
+                    "匹配结果",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (testResults.isEmpty()) {
+                    LiquidCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    Icons.AutoMirrored.Outlined.Rule,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(48.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    if (testContent.isBlank()) "请输入内容开始测试" else "没有匹配的规则",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        testResults.forEach { (ch, cfg) ->
+                            LiquidCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = Color(0xFF10B981).copy(alpha = 0.1f)
+                                ),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF10B981).copy(alpha = 0.2f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Color(0xFF10B981),
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "关键词: ${if (cfg.keyword.isBlank()) "全部" else cfg.keyword}",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            "→ ${ch.name} (${getChannelTypeLabel(ch.type)})",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(vertical = 14.dp)
+                ) { Text("关闭", fontSize = 16.sp) }
+            }
+        }
+    }
+}
+
+@Composable
+fun AboutDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val packageManager = context.packageManager
+    val packageName = context.packageName
+    val versionName = try {
+        packageManager.getPackageInfo(packageName, 0).versionName
+    } catch (e: Exception) {
+        "未知版本"
+    }
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    var closing by remember { mutableStateOf(false) }
+    val close: () -> Unit = {
+        if (!closing) {
+            closing = true
+            scope.launch {
+                sheetState.hide()
+                if (!sheetState.isVisible) onDismiss()
+                closing = false
+            }
+        }
+    }
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.fillMaxHeight(.92f).testTag("about-sheet"),
+        sheetState = sheetState,
+        sheetMaxWidth = androidx.compose.ui.unit.Dp.Unspecified,
+        shape = GlassShapes.bottomSheet,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        tonalElevation = 0.dp,
+        scrimColor = Color.Black.copy(alpha = .6f),
+        dragHandle = null,
+        // The sheet surface covers the entire bottom. Only its CONTENT is inset for system UI.
+        windowInsets = WindowInsets(0, 0, 0, 0)
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                    .padding(start = 24.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("关于", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                IconButton(onClick = close, enabled = !closing, modifier = Modifier.size(48.dp)) {
+                    Icon(Icons.Outlined.Close, contentDescription = "关闭关于")
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState())
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                    .padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 24.dp).testTag("about-content"),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                com.lanbing.smsforwarder.ui.AppIdentityIcon(Modifier.size(72.dp).clip(RoundedCornerShape(20.dp)))
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    "短信转发助手",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "版本 $versionName",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    "轻量、稳定、开源的 Android 短信转发应用。支持企业微信、钉钉、飞书和自定义 Webhook 等多种转发渠道，支持关键词匹配、黑白名单过滤、验证码提取、消息模板自定义、快速创建引导等功能。",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                com.lanbing.smsforwarder.ui.OpenSourceNotice()
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "原项目官方网站：https://smsforwarder.cn/",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.clickable {
+                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://smsforwarder.cn/"))
+                        context.startActivity(intent)
+                    }
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "原项目备案号：鲁ICP备2026018166号-2A",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "© 2026 华昊科技有限公司",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Button(
+                    onClick = close,
+                    enabled = !closing,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(vertical = 14.dp)
+                ) { Text("关闭", fontSize = 16.sp) }
+            }
+        }
+    }
+}
+
+@Composable
+fun SimCardInfoCard(permissionUpdateTrigger: Int) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE) }
+    
+    var customSim1Phone by remember { mutableStateOf(prefs.getString(Constants.PREF_CUSTOM_SIM1_PHONE, null)) }
+    var customSim2Phone by remember { mutableStateOf(prefs.getString(Constants.PREF_CUSTOM_SIM2_PHONE, null)) }
+    
+    val hasPhonePermission by remember(permissionUpdateTrigger) {
+        derivedStateOf {
+            ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+    
+    val simCards = remember(customSim1Phone, customSim2Phone, permissionUpdateTrigger) { 
+        getSimCardInfo(context, customSim1Phone, customSim2Phone) 
+    }
+    
+    var showEditDialog by remember { mutableStateOf<Int?>(null) }
+    var editPhoneNumber by remember { mutableStateOf("") }
+
+    ModernCard {
+        Column(modifier = Modifier.padding(20.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Phone,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "SIM 卡信息",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "点击编辑按钮手动输入本机号码",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // 电话权限提示
+            if (!hasPhonePermission) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            try {
+                                val intent = Intent().apply {
+                                    action = "android.settings.APPLICATION_DETAILS_SETTINGS"
+                                    data = Uri.fromParts("package", context.packageName, null)
+                                }
+                                context.startActivity(intent)
+                            } catch (_: Exception) {
+                                Toast.makeText(context, "请手动打开系统设置", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.9f),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Filled.Warning,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "需要电话权限才能自动获取本机号码",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "点击前往设置开启权限，或手动输入号码",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            Icons.Filled.ChevronRight,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+            }
+            
+            // 提示信息
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "小米/澎湃OS等定制ROM通常无法自动获取本机号码，请手动输入",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (simCards.isEmpty()) {
+                Text(
+                    "无法读取 SIM 卡信息",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                simCards.forEachIndexed { index, simInfo ->
+                    SimCardItem(
+                        slot = index + 1,
+                        phoneNumber = simInfo.phoneNumber,
+                        carrierName = simInfo.carrierName,
+                        isCustom = simInfo.isCustom,
+                        onEdit = {
+                            showEditDialog = index + 1
+                            editPhoneNumber = simInfo.phoneNumber ?: ""
+                        },
+                        onClear = {
+                            if (index + 1 == 1) {
+                                customSim1Phone = null
+                                prefs.edit().remove(Constants.PREF_CUSTOM_SIM1_PHONE).apply()
+                            } else {
+                                customSim2Phone = null
+                                prefs.edit().remove(Constants.PREF_CUSTOM_SIM2_PHONE).apply()
+                            }
+                        }
+                    )
+                    if (index < simCards.size - 1) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+                }
+            }
+        }
+    }
+
+    // 编辑 SIM 号码对话框
+    showEditDialog?.let { slot ->
+        EditSimPhoneDialog(
+            slot = slot,
+            currentPhoneNumber = editPhoneNumber,
+            onDismiss = { showEditDialog = null },
+            onSave = { newPhoneNumber ->
+                if (slot == 1) {
+                    customSim1Phone = newPhoneNumber.takeIf { it.isNotBlank() }
+                    if (newPhoneNumber.isNotBlank()) {
+                        prefs.edit().putString(Constants.PREF_CUSTOM_SIM1_PHONE, newPhoneNumber).apply()
+                    } else {
+                        prefs.edit().remove(Constants.PREF_CUSTOM_SIM1_PHONE).apply()
+                    }
+                } else {
+                    customSim2Phone = newPhoneNumber.takeIf { it.isNotBlank() }
+                    if (newPhoneNumber.isNotBlank()) {
+                        prefs.edit().putString(Constants.PREF_CUSTOM_SIM2_PHONE, newPhoneNumber).apply()
+                    } else {
+                        prefs.edit().remove(Constants.PREF_CUSTOM_SIM2_PHONE).apply()
+                    }
+                }
+                showEditDialog = null
+            }
+        )
+    }
+}
+
+private data class SimCardInfo(
+    val phoneNumber: String?,
+    val carrierName: String?,
+    val isCustom: Boolean = false
+)
+
+private fun getSimCardInfo(context: Context, customSim1Phone: String? = null, customSim2Phone: String? = null): List<SimCardInfo> {
+    val simCards = mutableListOf<SimCardInfo>()
+    try {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            // 即使没有权限，也显示自定义号码
+            if (customSim1Phone != null) {
+                simCards.add(SimCardInfo(phoneNumber = customSim1Phone, carrierName = null, isCustom = true))
+            }
+            if (customSim2Phone != null) {
+                simCards.add(SimCardInfo(phoneNumber = customSim2Phone, carrierName = null, isCustom = true))
+            }
+            return simCards
+        }
+
+        val subscriptionManager = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                @Suppress("DEPRECATION")
+                SubscriptionManager.from(context)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.e("SimCardInfo", "获取 SubscriptionManager 失败", e)
+            null
+        }
+
+        var addedSim1 = false
+        var addedSim2 = false
+        
+        if (subscriptionManager != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            try {
+                val activeSubscriptions = subscriptionManager.activeSubscriptionInfoList
+                activeSubscriptions?.forEachIndexed { index, subInfo ->
+                    try {
+                        val slotIndex = index + 1
+                        val customPhone = if (slotIndex == 1) customSim1Phone else if (slotIndex == 2) customSim2Phone else null
+                        @Suppress("DEPRECATION")
+                        val phoneNumber = customPhone ?: subInfo?.number?.takeIf { it.isNotBlank() }
+                        simCards.add(
+                            SimCardInfo(
+                                phoneNumber = phoneNumber,
+                                carrierName = subInfo?.carrierName?.toString(),
+                                isCustom = customPhone != null
+                            )
+                        )
+                        if (slotIndex == 1) addedSim1 = true
+                        if (slotIndex == 2) addedSim2 = true
+                    } catch (e: Exception) {
+                        Log.e("SimCardInfo", "处理 subscriptionInfo 失败", e)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("SimCardInfo", "获取 activeSubscriptions 失败", e)
+            }
+        }
+
+        // 如果 SIM1 没有添加但有自定义号码，添加
+        if (!addedSim1 && customSim1Phone != null) {
+            simCards.add(SimCardInfo(phoneNumber = customSim1Phone, carrierName = null, isCustom = true))
+            addedSim1 = true
+        }
+        // 如果 SIM2 没有添加但有自定义号码，添加
+        if (!addedSim2 && customSim2Phone != null) {
+            simCards.add(SimCardInfo(phoneNumber = customSim2Phone, carrierName = null, isCustom = true))
+            addedSim2 = true
+        }
+
+        // 回退方案：如果没有获取到任何 SIM 信息但有自定义号码
+        if (simCards.isEmpty()) {
+            if (customSim1Phone != null) {
+                simCards.add(SimCardInfo(phoneNumber = customSim1Phone, carrierName = null, isCustom = true))
+            }
+            if (customSim2Phone != null) {
+                simCards.add(SimCardInfo(phoneNumber = customSim2Phone, carrierName = null, isCustom = true))
+            }
+            
+            // 如果没有自定义号码，尝试获取默认号码
+            if (simCards.isEmpty()) {
+                try {
+                    val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+                    if (telephonyManager != null) {
+                        @Suppress("DEPRECATION")
+                        val phoneNumber = telephonyManager.line1Number
+                        val carrierName = try {
+                            telephonyManager.networkOperatorName
+                        } catch (e: Exception) {
+                            null
+                        }
+                        if (!phoneNumber.isNullOrBlank()) {
+                            simCards.add(
+                                SimCardInfo(
+                                    phoneNumber = phoneNumber,
+                                    carrierName = carrierName,
+                                    isCustom = false
+                                )
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("SimCardInfo", "获取默认号码失败", e)
+                }
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        // 即使出错，也显示自定义号码（避免重复添加）
+        val addedSim1InCatch = simCards.any { it.isCustom }
+        if (!addedSim1InCatch && customSim1Phone != null) {
+            simCards.add(SimCardInfo(phoneNumber = customSim1Phone, carrierName = null, isCustom = true))
+        }
+        val addedSim2InCatch = simCards.size > 1
+        if (!addedSim2InCatch && customSim2Phone != null) {
+            simCards.add(SimCardInfo(phoneNumber = customSim2Phone, carrierName = null, isCustom = true))
+        }
+    }
+    return simCards
+}
+
+@Composable
+fun SimCardItem(
+    slot: Int, 
+    phoneNumber: String?, 
+    carrierName: String?,
+    isCustom: Boolean = false,
+    onEdit: () -> Unit = {},
+    onClear: () -> Unit = {}
+) {
+    LiquidCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(if (isCustom) Color(0xFF10B981).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "SIM$slot",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isCustom) Color(0xFF10B981) else MaterialTheme.colorScheme.primary
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        phoneNumber ?: "无法获取号码",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Medium,
+                        color = if (phoneNumber != null) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                    )
+                    if (isCustom) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            color = Color(0xFF10B981).copy(alpha = 0.2f),
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text(
+                                "自定义",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color(0xFF10B981),
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+                carrierName?.takeIf { it.isNotBlank() }?.let {
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(
+                    onClick = onEdit,
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Edit,
+                        contentDescription = "编辑",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+                if (isCustom) {
+                    IconButton(
+                        onClick = onClear,
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Delete,
+                            contentDescription = "清除",
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                    }
+                } else if (phoneNumber != null) {
+                    Icon(
+                        Icons.Filled.CheckCircle,
+                        contentDescription = null,
+                        tint = Color(0xFF10B981)
+                    )
+                } else {
+                    Icon(
+                        Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EditSimPhoneDialog(
+    slot: Int,
+    currentPhoneNumber: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var phoneNumber by remember { mutableStateOf(currentPhoneNumber) }
+    
+    ModernAlertDialog(
+        onDismissRequest = onDismiss,
+        title = "设置 SIM$slot 号码",
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    "如果无法自动获取本机号码，可以手动输入",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = phoneNumber,
+                    onValueChange = { phoneNumber = it },
+                    label = { Text("本机号码") },
+                    placeholder = { Text("例如：13800138000") },
+                    modifier = Modifier.fillMaxWidth(),
+                    leadingIcon = {
+                        Icon(Icons.Outlined.Phone, contentDescription = null)
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(phoneNumber) },
+                shape = RoundedCornerShape(12.dp)
+            ) { Text("保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+// ========================================
+// 新的标签页组件
+// ========================================
+
+@Composable
+fun HomeTab(
+    isEnabled: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    startOnBoot: Boolean,
+    onStartOnBootChange: (Boolean) -> Unit,
+    smsGranted: Boolean,
+    notifGranted: Boolean,
+    isIgnoringBatteryOptimizations: Boolean,
+    onRequestSmsPermission: () -> Unit,
+    onRequestNotificationPermission: () -> Unit,
+    onRequestBatteryOptimization: () -> Unit,
+    onQuickSetup: () -> Unit,
+    hasChannels: Boolean
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = glassPagePadding()
+    ) {
+        item { LiquidPageHeading("转发中心", "短信、来电与应用通知") }
+        // Service Status Card
+        item {
+            ModernCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "转发服务",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val statusColor = if (isEnabled) Color(0xFF10B981) else Color(0xFF9CA3AF)
+                                Box(
+                                    modifier = Modifier
+                                        .size(12.dp)
+                                        .background(statusColor, shape = CircleShape)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    if (isEnabled) "服务运行中" else "服务已停止",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        val switchScale by animateFloatAsState(
+                            targetValue = if (isEnabled) 1.1f else 1f,
+                            animationSpec = spring(stiffness = Spring.StiffnessMedium),
+                            label = "switchAnimation"
+                        )
+                        Switch(
+                            checked = isEnabled,
+                            onCheckedChange = onEnabledChange,
+                            modifier = Modifier.scale(switchScale),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // Permission items
+                    PermissionItem(
+                        icon = Icons.Outlined.Notifications,
+                        title = "通知权限",
+                        granted = notifGranted,
+                        onClick = onRequestNotificationPermission
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    PermissionItem(
+                        icon = Icons.Outlined.Sms,
+                        title = "短信权限",
+                        granted = smsGranted,
+                        onClick = onRequestSmsPermission
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    PermissionItem(
+                        icon = Icons.Outlined.BatteryFull,
+                        title = "电池优化白名单",
+                        granted = isIgnoringBatteryOptimizations,
+                        onClick = onRequestBatteryOptimization
+                    )
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    HorizontalDivider()
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            Icons.Outlined.PowerSettingsNew,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "开机自启动",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                "设备启动后自动运行",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = startOnBoot,
+                            onCheckedChange = onStartOnBootChange
+                        )
+                    }
+                }
+            }
+        }
+
+        // 快速创建引导入口
+        item {
+            ModernCard(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = onQuickSetup
+            ) {
+                Row(
+                    modifier = Modifier.padding(20.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .background(
+                                MaterialTheme.colorScheme.primaryContainer,
+                                shape = RoundedCornerShape(12.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Outlined.Autorenew,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "快速创建",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            "3 步完成配置，快速添加通道和规则",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Icon(
+                        Icons.Outlined.ArrowForward,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // Security Warning
+        item {
+            ModernCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(20.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.tertiary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        "请确保转发通道是您信任的来源，避免验证码泄露",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun KeywordTab(
+    channels: List<Channel>,
+    configs: List<KeywordConfig>,
+    newKeywordInput: String,
+    onNewKeywordInputChange: (String) -> Unit,
+    selectedChannelIdForNewCfg: String,
+    onSelectedChannelIdForNewCfgChange: (String) -> Unit,
+    configChannelDropdownExpanded: Boolean,
+    onConfigChannelDropdownExpandedChange: (Boolean) -> Unit,
+    onAddConfig: () -> Unit,
+    onDeleteConfig: (KeywordConfig) -> Unit,
+    onEditConfig: (KeywordConfig) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = glassPagePadding()
+    ) {
+        item {
+            ModernCard {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF10B981).copy(alpha = 0.1f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Rule,
+                                contentDescription = null,
+                                tint = Color(0xFF10B981)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                "关键词配置",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "设置转发关键词",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = newKeywordInput,
+                        onValueChange = onNewKeywordInputChange,
+                        label = { Text("输入关键词（留空表示全部）") },
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingIcon = {
+                            Icon(Icons.Outlined.Search, contentDescription = null)
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    ExposedDropdownMenuBox(
+                        expanded = configChannelDropdownExpanded,
+                        onExpandedChange = onConfigChannelDropdownExpandedChange
+                    ) {
+                        OutlinedTextField(
+                            value = channels.find { it.id == selectedChannelIdForNewCfg }?.name ?: "选择转发通道",
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("转发通道") },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            leadingIcon = {
+                                Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = null)
+                            },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(configChannelDropdownExpanded) },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = configChannelDropdownExpanded,
+                            onDismissRequest = { onConfigChannelDropdownExpandedChange(false) }
+                        ) {
+                            channels.forEach { ch ->
+                                DropdownMenuItem(
+                                    text = { Text(ch.name) },
+                                    onClick = {
+                                        onSelectedChannelIdForNewCfgChange(ch.id)
+                                        onConfigChannelDropdownExpandedChange(false)
+                                    }
+                                )
+                            }
+                            if (channels.isEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text("请先添加通道") },
+                                    onClick = { onConfigChannelDropdownExpandedChange(false) }
+                                )
+                            }
+                        }
+                    }
+
+                    Button(
+                        onClick = onAddConfig,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 14.dp)
+                    ) {
+                        Icon(Icons.Outlined.Add, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("添加配置", fontSize = 16.sp)
+                    }
+
+                    // Config list
+                    if (configs.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "已添加 ${configs.size} 条规则",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        configs.forEach { cfg ->
+                            val chName = channels.find { it.id == cfg.channelId }?.name ?: "(已删除通道)"
+                            ConfigItem(
+                                config = cfg,
+                                channelName = chName,
+                                onEdit = { onEditConfig(cfg) },
+                                onDelete = { onDeleteConfig(cfg) }
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        EmptyState(
+                            icon = Icons.Outlined.Inbox,
+                            title = "还没有关键词规则",
+                            description = "添加规则后，匹配到的短信会自动转发到对应通道"
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChannelTab(
+    channels: List<Channel>,
+    newChannelName: String,
+    onNewChannelNameChange: (String) -> Unit,
+    newChannelTarget: String,
+    onNewChannelTargetChange: (String) -> Unit,
+    newChannelType: ChannelType,
+    onNewChannelTypeChange: (ChannelType) -> Unit,
+    channelTypeExpanded: Boolean,
+    onChannelTypeExpandedChange: (Boolean) -> Unit,
+    onAddChannel: () -> Unit,
+    onDeleteChannel: (Channel) -> Unit,
+    onEditChannel: (Channel) -> Unit
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = glassPagePadding()
+    ) {
+        item {
+            ModernCard {
+                Column(
+                    modifier = Modifier.padding(20.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Cloud,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                "转发通道管理",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "添加和管理转发通道",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = newChannelName,
+                        onValueChange = onNewChannelNameChange,
+                        label = { Text("通道名称") },
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingIcon = {
+                            Icon(Icons.AutoMirrored.Outlined.Label, contentDescription = null)
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+
+                    ExposedDropdownMenuBox(
+                        expanded = channelTypeExpanded,
+                        onExpandedChange = onChannelTypeExpandedChange
+                    ) {
+                        OutlinedTextField(
+                            value = getChannelTypeLabel(newChannelType),
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("通道类型") },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            leadingIcon = {
+                                Icon(Icons.Outlined.Category, contentDescription = null)
+                            },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(channelTypeExpanded) },
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = channelTypeExpanded,
+                            onDismissRequest = { onChannelTypeExpandedChange(false) }
+                        ) {
+                            ChannelType.entries.forEach { t ->
+                                DropdownMenuItem(
+                                    text = { Text(getChannelTypeLabel(t)) },
+                                    onClick = {
+                                        onNewChannelTypeChange(t)
+                                        onChannelTypeExpandedChange(false)
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = newChannelTarget,
+                        onValueChange = onNewChannelTargetChange,
+                        label = { Text("Webhook 地址") },
+                        modifier = Modifier.fillMaxWidth(),
+                        leadingIcon = {
+                            Icon(Icons.Outlined.Link, contentDescription = null)
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    if (newChannelType == ChannelType.GENERIC_WEBHOOK) {
+                        Text(
+                            text = "Bark 地址示例：https://api.day.app/你的Key/；删除复制地址中的示例标题和正文。消息模板填写普通文本。",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+
+                    // 测试转发按钮
+                    var testState by remember { mutableStateOf<TestSendState>(TestSendState.Idle) }
+                    OutlinedButton(
+                        onClick = {
+                            val url = newChannelTarget.trim()
+                            if (!WebhookSender.isValidUrl(url)) {
+                                testState = TestSendState.Error("Webhook 地址格式无效")
+                                return@OutlinedButton
+                            }
+                            testState = TestSendState.Sending
+                            kotlin.concurrent.thread {
+                                val result = WebhookSender.sendTestMessage(url, newChannelType, newChannelName.trim())
+                                testState = if (result.success) {
+                                    TestSendState.Success
+                                } else {
+                                    TestSendState.Error(result.errorMessage.ifBlank { "发送失败" })
+                                }
+                            }
+                        },
+                        enabled = testState != TestSendState.Sending && newChannelTarget.isNotBlank(),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        when (testState) {
+                            TestSendState.Idle -> Text("发送测试消息")
+                            TestSendState.Sending -> Text("发送中…")
+                            TestSendState.Success -> Text("✓ 发送成功")
+                            is TestSendState.Error -> Text("发送测试")
+                        }
+                    }
+                    when (val s = testState) {
+                        is TestSendState.Error -> Text(
+                            text = "发送失败：${s.message}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        TestSendState.Success -> Text(
+                            text = "测试消息发送成功，请检查目标通道是否收到",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF10B981)
+                        )
+                        else -> {}
+                    }
+
+                    // Security warning
+                    LiquidCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+                        )
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.tertiary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "请确保 Webhook 地址是您信任的来源，切勿使用陌生人提供的地址，以免验证码被窃取",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = onAddChannel,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 14.dp)
+                    ) {
+                        Icon(Icons.Outlined.Add, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("添加通道", fontSize = 16.sp)
+                    }
+
+                    // Channel list
+                    if (channels.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        channels.forEach { ch ->
+                            ChannelItem(
+                                name = ch.name,
+                                type = getChannelTypeLabel(ch.type),
+                                target = ch.target,
+                                onEdit = { onEditChannel(ch) },
+                                onDelete = { onDeleteChannel(ch) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SettingsTab(
+    globalMessageTemplate: String,
+    onSaveGlobalTemplate: (String) -> Unit,
+    batteryReminderEnabled: Boolean,
+    onBatteryReminderEnabledChange: (Boolean) -> Unit,
+    lowBatteryReminderEnabled: Boolean,
+    onLowBatteryReminderEnabledChange: (Boolean) -> Unit,
+    highBatteryReminderEnabled: Boolean,
+    onHighBatteryReminderEnabledChange: (Boolean) -> Unit,
+    chargingReminderEnabled: Boolean,
+    onChargingReminderEnabledChange: (Boolean) -> Unit,
+    batteryReminderChannelId: String?,
+    onBatteryReminderChannelIdChange: (String?) -> Unit,
+    channels: List<Channel>,
+    lowBatteryThreshold: Int,
+    onLowBatteryThresholdChange: (Int) -> Unit,
+    highBatteryThreshold: Int,
+    onHighBatteryThresholdChange: (Int) -> Unit,
+    senderWhitelist: List<String>,
+    onSenderWhitelistChange: (List<String>) -> Unit,
+    senderBlacklist: List<String>,
+    onSenderBlacklistChange: (List<String>) -> Unit,
+    contentWhitelist: List<String>,
+    onContentWhitelistChange: (List<String>) -> Unit,
+    contentBlacklist: List<String>,
+    onContentBlacklistChange: (List<String>) -> Unit,
+    onShowTestDialog: () -> Unit,
+    onRevokePrivacyConsent: () -> Unit,
+    onShowPrivacyPolicy: () -> Unit,
+    permissionUpdateTrigger: Int,
+    onExportConfig: () -> Unit,
+    onImportConfig: () -> Unit,
+    onStartService: () -> Unit = {},
+    section: SettingsSection? = null,
+    onSectionChange: (SettingsSection?) -> Unit = {}
+) {
+    var showChannelSelectionDialog by remember { mutableStateOf(false) }
+    val hubState = rememberLazyListState()
+    SettingsPageTransition(section) { displayedSection ->
+        if (displayedSection == null) {
+            SettingsHub(hubState, onOpen = { if (section == null) onSectionChange(it) })
+        } else {
+    key(displayedSection) {
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp).testTag("settings-detail-${displayedSection.name}"),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = glassPagePadding()
+    ) {
+        if (displayedSection == SettingsSection.TEMPLATES) {
+            item { com.lanbing.smsforwarder.ui.PushTemplateSettings(globalMessageTemplate, onSaveGlobalTemplate) }
+        }
+        if (displayedSection == SettingsSection.APPEARANCE) {
+            item { GlassAppearanceCard() }
+            item { com.lanbing.smsforwarder.ui.ServiceWidgetCard() }
+        }
+        if (displayedSection == SettingsSection.PERMISSIONS) {
+            item { SimCardInfoCard(permissionUpdateTrigger) }
+        }
+        if (displayedSection == SettingsSection.CALLS) {
+            item { com.lanbing.smsforwarder.ui.CallReminderCard(channels, permissionUpdateTrigger) }
+            item { com.lanbing.smsforwarder.ui.ContactNameCard(permissionUpdateTrigger) }
+        }
+        if (displayedSection == SettingsSection.SIGNAL) {
+            item { com.lanbing.smsforwarder.ui.SignalReminderCard(channels, permissionUpdateTrigger) }
+        }
+        if (displayedSection == SettingsSection.APPS) {
+            item { com.lanbing.smsforwarder.ui.AppNotificationCard(channels, permissionUpdateTrigger) }
+        }
+
+        if (displayedSection == SettingsSection.BATTERY) {
+        // 电量提醒配置
+        item {
+            ModernCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        "电量提醒",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 电量提醒开关
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            Icons.Outlined.BatteryAlert,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "开启电量提醒",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                "电量变化时发送通知提醒",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = batteryReminderEnabled,
+                            onCheckedChange = onBatteryReminderEnabledChange
+                        )
+                    }
+
+                    com.lanbing.smsforwarder.ui.BatteryStepReminderControl(permissionUpdateTrigger)
+
+                    if (batteryReminderEnabled) {
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // 低电量提醒开关
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                Icons.Outlined.BatteryAlert,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "低电量提醒",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    "电量低于阈值时提醒",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = lowBatteryReminderEnabled,
+                                onCheckedChange = onLowBatteryReminderEnabledChange
+                            )
+                        }
+
+                        if (lowBatteryReminderEnabled) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            // 低电量阈值
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    "低电量提醒阈值",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "$lowBatteryThreshold%",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Slider(
+                                        value = lowBatteryThreshold.toFloat(),
+                                        onValueChange = { onLowBatteryThresholdChange(it.toInt()) },
+                                        valueRange = 5f..50f,
+                                        steps = 8,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Text(
+                                    "当电量低于此阈值时提醒",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // 高电量提醒开关
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                Icons.Outlined.BatteryFull,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "高电量提醒",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    "电量高于阈值时提醒",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = highBatteryReminderEnabled,
+                                onCheckedChange = onHighBatteryReminderEnabledChange
+                            )
+                        }
+
+                        if (highBatteryReminderEnabled) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            // 高电量阈值
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    "高电量提醒阈值",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        text = "$highBatteryThreshold%",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Slider(
+                                        value = highBatteryThreshold.toFloat(),
+                                        onValueChange = { onHighBatteryThresholdChange(it.toInt()) },
+                                        valueRange = 50f..100f,
+                                        steps = 8,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+                                Text(
+                                    "当电量高于此阈值时提醒",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    // 充电提醒开关
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            Icons.Filled.Power,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "充电提醒",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                "设备开始或结束充电时发送提醒",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = chargingReminderEnabled,
+                            onCheckedChange = onChargingReminderEnabledChange
+                        )
+                    }
+
+                    // 电池提醒通道选择
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            "提醒通道",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "选择发送电量提醒的通道，不选择则发送到所有通道",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .border(
+                                    width = 1.dp,
+                                    color = MaterialTheme.colorScheme.outline,
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable {
+                                    showChannelSelectionDialog = true
+                                }
+                                .padding(16.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = if (batteryReminderChannelId.isNullOrEmpty()) {
+                                        "所有通道"
+                                    } else {
+                                        channels.find { it.id == batteryReminderChannelId }?.name ?: "未知通道"
+                                    },
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                Icon(
+                                    Icons.Filled.ArrowDropDown,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        }
+        if (displayedSection == SettingsSection.SMS) {
+        // 全局消息模板配置
+        item {
+            var templateExpanded by remember { mutableStateOf(false) }
+            var previewExpanded by remember { mutableStateOf(true) }
+
+            ModernCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Outlined.EditNote,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "消息模板",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                "短信默认格式，通道短信模板优先；其他提醒在“推送模板”中单独设置",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 模板输入框 + 预置模板 + 保存按钮
+                    var editTemplate by remember(globalMessageTemplate) {
+                        mutableStateOf(TextFieldValue(globalMessageTemplate, TextRange(globalMessageTemplate.length)))
+                    }
+                    var isDirty by remember(globalMessageTemplate) { mutableStateOf(false) }
+
+                    CollapsibleSection(
+                        title = "模板设置",
+                        expanded = templateExpanded,
+                        onToggle = { templateExpanded = !templateExpanded }
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(
+                                value = editTemplate,
+                                onValueChange = {
+                                    editTemplate = it
+                                    isDirty = true
+                                },
+                                label = { Text("消息模板") },
+                                placeholder = { Text("输入消息模板...") },
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 80.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                maxLines = 6,
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    fontSize = MaterialTheme.typography.bodyMedium.fontSize
+                                )
+                            )
+
+                            // 未保存提示
+                            if (isDirty) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Info,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.tertiary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        "修改尚未保存",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.tertiary
+                                    )
+                                }
+                            }
+
+                            // 保存按钮
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        onSaveGlobalTemplate(editTemplate.text)
+                                        isDirty = false
+                                    },
+                                    enabled = isDirty,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f).height(48.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+                                ) {
+                                    Icon(Icons.Outlined.Save, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("保存模板", fontWeight = FontWeight.SemiBold)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        editTemplate = TextFieldValue(globalMessageTemplate, TextRange(globalMessageTemplate.length))
+                                        isDirty = false
+                                    },
+                                    enabled = isDirty,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.height(48.dp),
+                                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
+                                ) {
+                                    Text("重置")
+                                }
+                            }
+
+                            // 预置模板下拉
+                            var presetExpanded by remember { mutableStateOf(false) }
+                            ExposedDropdownMenuBox(
+                                expanded = presetExpanded,
+                                onExpandedChange = { presetExpanded = !presetExpanded }
+                            ) {
+                                OutlinedTextField(
+                                    value = "选择预置模板",
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    label = { Text("快速选择") },
+                                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = presetExpanded) },
+                                    modifier = Modifier.fillMaxWidth().menuAnchor(),
+                                    shape = RoundedCornerShape(12.dp),
+                                    leadingIcon = {
+                                        Icon(
+                                            Icons.Outlined.Autorenew,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                )
+                                DropdownMenu(
+                                    expanded = presetExpanded,
+                                    onDismissRequest = { presetExpanded = false },
+                                    modifier = Modifier.exposedDropdownSize(true)
+                                ) {
+                                    MessageTemplateRenderer.getPresetTemplates().forEach { (label, template) ->
+                                        DropdownMenuItem(
+                                            text = {
+                                                Column {
+                                                    Text(label, fontWeight = FontWeight.Medium)
+                                                    Text(
+                                                        text = template.take(40) + "…",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                                        maxLines = 1
+                                                    )
+                                                }
+                                            },
+                                            onClick = {
+                                                editTemplate = TextFieldValue(template, TextRange(template.length))
+                                                isDirty = true
+                                                presetExpanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            com.lanbing.smsforwarder.ui.TemplateVariablesMenu(
+                                MessageTemplateRenderer.getPlaceholderHints(),
+                                onInsert = { token ->
+                                    editTemplate = com.lanbing.smsforwarder.ui.insertTemplateVariable(editTemplate, token)
+                                    isDirty = true
+                                },
+                                tagPrefix = "sms-template-variables"
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 实时预览
+                    CollapsibleSection(
+                        title = "消息预览",
+                        expanded = previewExpanded,
+                        onToggle = { previewExpanded = !previewExpanded }
+                    ) {
+                        Column {
+                            Text(
+                                "预览效果（模拟数据）",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                val previewParams = MessageTemplateRenderer.TemplateParams(
+                                    sender = "10086",
+                                    content = "【中国移动】您的验证码是 123456，5分钟内有效，请勿告知他人。",
+                                    receiverPhone = "138****8888",
+                                    verificationCode = "123456",
+                                    matchedKeyword = "验证码",
+                                    channelName = "默认通道"
+                                )
+                                Text(
+                                    text = MessageTemplateRenderer.render(editTemplate.text, previewParams),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    modifier = Modifier.padding(12.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        }
+        if (displayedSection == SettingsSection.SMS) {
+        // 发送者过滤
+        item {
+            var showWhitelistDialog by remember { mutableStateOf(false) }
+            var showBlacklistDialog by remember { mutableStateOf(false) }
+
+            ModernCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        "发送者过滤",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "全局过滤短信发送者号码，白名单优先级高于黑名单。支持通配符（* 代表任意字符，? 代表单个字符）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 白名单
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Outlined.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF10B981)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "白名单",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                if (senderWhitelist.isEmpty()) "未设置（全部放行）" else "${senderWhitelist.size} 条规则",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = { showWhitelistDialog = true }) {
+                            Text("编辑")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 黑名单
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Outlined.Block,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "黑名单",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                if (senderBlacklist.isEmpty()) "未设置" else "${senderBlacklist.size} 条规则",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = { showBlacklistDialog = true }) {
+                            Text("编辑")
+                        }
+                    }
+                }
+            }
+
+            // 白名单编辑对话框
+            if (showWhitelistDialog) {
+                SenderFilterDialog(
+                    title = "发送者白名单",
+                    description = "只有匹配的发送者号码才会被转发。每行一个规则，支持通配符（如 106*、138*）",
+                    items = senderWhitelist,
+                    ruleType = FilterRuleType.SENDER_WHITELIST,
+                    onDismiss = { showWhitelistDialog = false },
+                    onSave = { list ->
+                        onSenderWhitelistChange(list)
+                        showWhitelistDialog = false
+                    }
+                )
+            }
+
+            // 黑名单编辑对话框
+            if (showBlacklistDialog) {
+                SenderFilterDialog(
+                    title = "发送者黑名单",
+                    description = "匹配的发送者号码会被直接拦截，不会转发。每行一个规则，支持通配符（如 106*、400*）",
+                    items = senderBlacklist,
+                    ruleType = FilterRuleType.SENDER_BLACKLIST,
+                    onDismiss = { showBlacklistDialog = false },
+                    onSave = { list ->
+                        onSenderBlacklistChange(list)
+                        showBlacklistDialog = false
+                    }
+                )
+            }
+        }
+
+        }
+        if (displayedSection == SettingsSection.SMS) {
+        // 内容过滤
+        item {
+            var showContentWhitelistDialog by remember { mutableStateOf(false) }
+            var showContentBlacklistDialog by remember { mutableStateOf(false) }
+
+            ModernCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        "内容过滤",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "全局过滤短信内容，白名单优先级高于黑名单。支持通配符（* 代表任意字符，? 代表单个字符）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // 白名单
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Outlined.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF10B981)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "白名单",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                if (contentWhitelist.isEmpty()) "未设置（全部放行）" else "${contentWhitelist.size} 条规则",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = { showContentWhitelistDialog = true }) {
+                            Text("编辑")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // 黑名单
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Outlined.Block,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "黑名单",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                if (contentBlacklist.isEmpty()) "未设置" else "${contentBlacklist.size} 条规则",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = { showContentBlacklistDialog = true }) {
+                            Text("编辑")
+                        }
+                    }
+                }
+            }
+
+            // 内容白名单编辑对话框
+            if (showContentWhitelistDialog) {
+                SenderFilterDialog(
+                    title = "内容白名单",
+                    description = "只有内容匹配的短信才会被转发。每行一个规则，支持通配符（如 *验证码*、*银行*）",
+                    items = contentWhitelist,
+                    ruleType = FilterRuleType.CONTENT_WHITELIST,
+                    onDismiss = { showContentWhitelistDialog = false },
+                    onSave = { list ->
+                        onContentWhitelistChange(list)
+                        showContentWhitelistDialog = false
+                    }
+                )
+            }
+
+            // 内容黑名单编辑对话框
+            if (showContentBlacklistDialog) {
+                SenderFilterDialog(
+                    title = "内容黑名单",
+                    description = "内容匹配的短信会被直接拦截，不会转发。每行一个规则，支持通配符（如 *推销*、*贷款*）",
+                    items = contentBlacklist,
+                    ruleType = FilterRuleType.CONTENT_BLACKLIST,
+                    onDismiss = { showContentBlacklistDialog = false },
+                    onSave = { list ->
+                        onContentBlacklistChange(list)
+                        showContentBlacklistDialog = false
+                    }
+                )
+            }
+        }
+
+        }
+        if (displayedSection == SettingsSection.TOOLS) {
+        // 工具
+        item {
+            ModernCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        "工具",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = onExportConfig,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 14.dp)
+                    ) {
+                        Icon(Icons.Filled.Share, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("导出配置", fontSize = 16.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = onImportConfig,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 14.dp)
+                    ) {
+                        Icon(Icons.Filled.Download, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("导入配置", fontSize = 16.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = onShowTestDialog,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 14.dp)
+                    ) {
+                        Icon(Icons.Outlined.Science, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("测试规则", fontSize = 16.sp)
+                    }
+                }
+            }
+        }
+
+        }
+        if (displayedSection == SettingsSection.PERMISSIONS) {
+        // 权限管理
+        item {
+            ModernCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        "权限管理",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    val ctx = LocalContext.current
+
+                    val smsGranted by remember(permissionUpdateTrigger) {
+                        derivedStateOf {
+                            ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED
+                        }
+                    }
+                    val notifGranted by remember(permissionUpdateTrigger) {
+                        derivedStateOf {
+                            NotificationManagerCompat.from(ctx).areNotificationsEnabled()
+                        }
+                    }
+                    val phoneGranted by remember(permissionUpdateTrigger) {
+                        derivedStateOf {
+                            ContextCompat.checkSelfPermission(ctx, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+                        }
+                    }
+                    val batteryGranted by remember(permissionUpdateTrigger) {
+                        derivedStateOf {
+                            Build.VERSION.SDK_INT < 23 ||
+                                (ctx.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(ctx.packageName)
+                        }
+                    }
+
+                    PermissionManagementItem(
+                        icon = Icons.AutoMirrored.Outlined.Message,
+                        title = "短信权限",
+                        description = "用于接收并识别短信内容",
+                        granted = smsGranted,
+                        onClick = {
+                            try {
+                                val intent = Intent().apply {
+                                    action = "android.settings.APPLICATION_DETAILS_SETTINGS"
+                                    data = Uri.fromParts("package", ctx.packageName, null)
+                                }
+                                ctx.startActivity(intent)
+                            } catch (_: Exception) {
+                                Toast.makeText(ctx, "请手动打开系统设置", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    PermissionManagementItem(
+                        icon = Icons.Outlined.Notifications,
+                        title = "通知权限",
+                        description = "用于显示服务运行状态和提醒",
+                        granted = notifGranted,
+                        onClick = {
+                            try {
+                                val intent = Intent().apply {
+                                    action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        Settings.ACTION_APP_NOTIFICATION_SETTINGS
+                                    } else {
+                                        "android.settings.APPLICATION_DETAILS_SETTINGS"
+                                    }
+                                    data = Uri.fromParts("package", ctx.packageName, null)
+                                }
+                                ctx.startActivity(intent)
+                            } catch (_: Exception) {
+                                Toast.makeText(ctx, "请手动打开系统设置", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    PermissionManagementItem(
+                        icon = Icons.Outlined.Phone,
+                        title = "读取手机状态",
+                        description = "用于识别双卡手机的SIM卡信息（可选）",
+                        granted = phoneGranted,
+                        onClick = {
+                            try {
+                                val intent = Intent().apply {
+                                    action = "android.settings.APPLICATION_DETAILS_SETTINGS"
+                                    data = Uri.fromParts("package", ctx.packageName, null)
+                                }
+                                ctx.startActivity(intent)
+                            } catch (_: Exception) {
+                                Toast.makeText(ctx, "请手动打开系统设置", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    PermissionManagementItem(
+                        icon = Icons.Outlined.BatteryFull,
+                        title = "忽略电池优化",
+                        description = "防止系统杀死后台服务（可选）",
+                        granted = batteryGranted,
+                        onClick = {
+                            try {
+                                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                    data = Uri.parse("package:${ctx.packageName}")
+                                }
+                                ctx.startActivity(intent)
+                            } catch (_: Exception) {
+                                Toast.makeText(ctx, "请手动打开系统设置", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        }
+        if (displayedSection == SettingsSection.PRIVACY) {
+        // 隐私设置
+        item {
+            ModernCard(
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text(
+                        "隐私设置",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Button(
+                        onClick = onShowPrivacyPolicy,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 14.dp)
+                    ) {
+                        Icon(Icons.Outlined.FilePresent, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("隐私政策", fontSize = 16.sp)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    OutlinedButton(
+                        onClick = onRevokePrivacyConsent,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(vertical = 14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                    ) {
+                        Icon(Icons.Outlined.Shield, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("撤销隐私政策同意", fontSize = 16.sp)
+                    }
+                }
+            }
+        }
+        }
+    }
+    }
+
+        }
+    }
+
+    // 通道选择弹窗
+    if (showChannelSelectionDialog) {
+        AlertDialog(
+            onDismissRequest = { showChannelSelectionDialog = false },
+            title = { Text("选择提醒通道") },
+            text = {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "选择发送电量提醒的通道，选择\"所有通道\"则发送到全部已配置通道",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    LazyColumn(modifier = Modifier.height(200.dp)) {
+                        item {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onBatteryReminderChannelIdChange(null)
+                                        showChannelSelectionDialog = false
+                                    }
+                                    .padding(vertical = 12.dp)
+                            ) {
+                                RadioButton(
+                                    selected = batteryReminderChannelId.isNullOrEmpty(),
+                                    onClick = {
+                                        onBatteryReminderChannelIdChange(null)
+                                        showChannelSelectionDialog = false
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text("所有通道")
+                            }
+                        }
+                        channels.forEach { channel ->
+                            item {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            onBatteryReminderChannelIdChange(channel.id)
+                                            showChannelSelectionDialog = false
+                                        }
+                                        .padding(vertical = 12.dp)
+                                ) {
+                                    RadioButton(
+                                        selected = batteryReminderChannelId == channel.id,
+                                        onClick = {
+                                            onBatteryReminderChannelIdChange(channel.id)
+                                            showChannelSelectionDialog = false
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(channel.name)
+                                        Text(
+                                            channel.type.name,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showChannelSelectionDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun PermissionManagementItem(
+    icon: ImageVector,
+    title: String,
+    description: String,
+    granted: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(vertical = 8.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    if (granted) Color(0xFF22C55E).copy(alpha = 0.1f)
+                    else MaterialTheme.colorScheme.tertiary.copy(alpha = 0.1f)
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = if (granted) Color(0xFF22C55E) else MaterialTheme.colorScheme.tertiary,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
+            )
+            Text(
+                description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (granted) "已开启" else "去设置",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (granted) Color(0xFF22C55E) else MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+fun getChannelTypeLabel(type: ChannelType): String = ConfigManager.getChannelTypeLabel(type)
+
+fun getMatchModeLabel(mode: MatchMode): String = when (mode) {
+    MatchMode.CONTAINS -> "包含匹配"
+    MatchMode.EXACT -> "精确匹配"
+    MatchMode.REGEX -> "正则表达式"
+    MatchMode.EXCLUDE -> "排除匹配"
+}
+
+fun getMatchLogicLabel(logic: MatchLogic): String = when (logic) {
+    MatchLogic.OR -> "OR（任一命中）"
+    MatchLogic.AND -> "AND（全部命中）"
+}
+
+fun getSenderMatchModeLabel(mode: SenderMatchMode): String = when (mode) {
+    SenderMatchMode.CONTAINS -> "包含匹配"
+    SenderMatchMode.EXACT -> "精确匹配"
+    SenderMatchMode.WILDCARD -> "通配符（* ?）"
+    SenderMatchMode.REGEX -> "正则表达式"
+}
+
+fun getMatchModeDescription(mode: MatchMode): String = when (mode) {
+    MatchMode.CONTAINS -> "短信内容中包含关键词即匹配"
+    MatchMode.EXACT -> "短信内容与关键词完全一致才匹配"
+    MatchMode.REGEX -> "使用正则表达式匹配短信内容"
+    MatchMode.EXCLUDE -> "短信内容不包含关键词才匹配（反向）"
+}
+
+fun getMatchLogicDescription(logic: MatchLogic): String = when (logic) {
+    MatchLogic.OR -> "任一关键词命中即匹配（适合多条独立规则）"
+    MatchLogic.AND -> "全部关键词同时命中才匹配（适合组合条件）"
+}
+
+fun getSenderMatchModeDescription(mode: SenderMatchMode): String = when (mode) {
+    SenderMatchMode.CONTAINS -> "发送者号码包含指定内容"
+    SenderMatchMode.EXACT -> "发送者号码完全一致"
+    SenderMatchMode.WILDCARD -> "通配符匹配：*代表任意字符，?代表单个字符"
+    SenderMatchMode.REGEX -> "使用正则表达式匹配发送者号码"
+}
+
+/**
+ * 测试消息发送状态
+ */
+sealed class TestSendState {
+    object Idle : TestSendState()
+    object Sending : TestSendState()
+    object Success : TestSendState()
+    data class Error(val message: String) : TestSendState()
+}
+
+/**
+ * 分组节标题
+ */
+@Composable
+fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.padding(bottom = 12.dp)
+    )
+}
+
+/**
+ * 空状态提示
+ */
+@Composable
+fun EmptyState(
+    icon: ImageVector,
+    title: String,
+    description: String
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Box(
+            modifier = Modifier.size(64.dp).clip(CircleShape).background(
+                MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+            ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(32.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = description,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+    }
+}
+
+/**
+ * 可折叠的分组区域
+ */
+@Composable
+fun CollapsibleSection(
+    title: String,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    accent: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column {
+        Surface(
+            onClick = onToggle,
+            modifier = Modifier.fillMaxWidth(),
+            color = Color.Transparent
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (expanded) Icons.Outlined.ExpandMore else Icons.Outlined.ChevronRight,
+                    contentDescription = null,
+                    tint = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (accent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                if (accent && !expanded) {
+                    Text(
+                        text = "点击展开",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+        if (expanded) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Column(content = content)
+        }
+    }
+}
+
+/**
+ * 快速创建引导对话框（三步式向导）
+ *
+ * 步骤 1：选择通道类型
+ * 步骤 2：填写 Webhook 地址
+ * 步骤 3：配置关键词（可选）
+ */
+@Composable
+fun QuickSetupDialog(
+    onDismiss: () -> Unit,
+    onComplete: (channelType: ChannelType, webhookUrl: String, channelName: String, keyword: String) -> Unit
+) {
+    var currentStep by remember { mutableIntStateOf(1) }
+    var selectedType by remember { mutableStateOf(ChannelType.WECHAT) }
+    var webhookUrl by remember { mutableStateOf("") }
+    var channelName by remember { mutableStateOf("") }
+    var keyword by remember { mutableStateOf("") }
+    var urlError by remember { mutableStateOf<String?>(null) }
+
+    val stepTitles = listOf("选择通道类型", "填写 Webhook 地址", "配置关键词")
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp
+        ) {
+            Column(modifier = Modifier.padding(24.dp)) {
+                // 标题
+                Text(
+                    text = stepTitles[currentStep - 1],
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "第 $currentStep 步，共 3 步",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // 进度指示器
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    repeat(3) { index ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(4.dp)
+                                .background(
+                                    color = if (index < currentStep) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                    shape = CircleShape
+                                )
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // 步骤内容
+                when (currentStep) {
+                    1 -> {
+                        // 步骤 1：选择通道类型
+                        ChannelTypeSelector(
+                            selectedType = selectedType,
+                            onTypeSelected = { selectedType = it }
+                        )
+                    }
+                    2 -> {
+                        // 步骤 2：填写 Webhook 地址
+                        StepTwoContent(
+                            webhookUrl = webhookUrl,
+                            onUrlChange = {
+                                webhookUrl = it
+                                urlError = null
+                            },
+                            channelName = channelName,
+                            onNameChange = { channelName = it },
+                            urlError = urlError,
+                            selectedType = selectedType
+                        )
+                    }
+                    3 -> {
+                        // 步骤 3：配置关键词
+                        StepThreeContent(
+                            keyword = keyword,
+                            onKeywordChange = { keyword = it },
+                            channelName = channelName.ifBlank { defaultChannelName(selectedType) },
+                            channelType = selectedType,
+                            webhookUrl = webhookUrl
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // 底部按钮
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    if (currentStep > 1) {
+                        TextButton(onClick = { currentStep-- }) {
+                            Text("上一步")
+                        }
+                    } else {
+                        TextButton(onClick = onDismiss) {
+                            Text("取消")
+                        }
+                    }
+
+                    Button(
+                        onClick = {
+                            when (currentStep) {
+                                1 -> currentStep = 2
+                                2 -> {
+                                    if (webhookUrl.isBlank()) {
+                                        urlError = "请输入 Webhook 地址"
+                                    } else if (!WebhookSender.isValidUrl(webhookUrl)) {
+                                        urlError = "Webhook 地址格式不正确"
+                                    } else {
+                                        currentStep = 3
+                                    }
+                                }
+                                3 -> {
+                                    val name = channelName.ifBlank { defaultChannelName(selectedType) }
+                                    onComplete(selectedType, webhookUrl.trim(), name, keyword.trim())
+                                }
+                            }
+                        }
+                    ) {
+                        Text(if (currentStep == 3) "完成" else "下一步")
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun defaultChannelName(type: ChannelType): String {
+    return when (type) {
+        ChannelType.WECHAT -> "企业微信"
+        ChannelType.DINGTALK -> "钉钉"
+        ChannelType.FEISHU -> "飞书"
+        ChannelType.GENERIC_WEBHOOK -> "通用 Webhook"
+    }
+}
+
+@Composable
+private fun ChannelTypeSelector(
+    selectedType: ChannelType,
+    onTypeSelected: (ChannelType) -> Unit
+) {
+    val types = listOf(
+        Triple(ChannelType.WECHAT, "企业微信", "最常用，推荐使用"),
+        Triple(ChannelType.DINGTALK, "钉钉", "钉钉群机器人"),
+        Triple(ChannelType.FEISHU, "飞书", "飞书群机器人"),
+        Triple(ChannelType.GENERIC_WEBHOOK, "Webhook / Bark", "自定义 HTTP 接口或 Bark 推送")
+    )
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        types.forEach { (type, name, desc) ->
+            val isSelected = selectedType == type
+            Surface(
+                onClick = { onTypeSelected(type) },
+                shape = MaterialTheme.shapes.large,
+                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                border = BorderStroke(
+                    width = if (isSelected) 2.dp else 1.dp,
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = when (type) {
+                            ChannelType.WECHAT -> Icons.Outlined.Chat
+                            ChannelType.DINGTALK -> Icons.Outlined.Groups
+                            ChannelType.FEISHU -> Icons.Outlined.Send
+                            ChannelType.GENERIC_WEBHOOK -> Icons.Outlined.Language
+                        },
+                        contentDescription = null,
+                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(modifier = Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = name,
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Text(
+                            text = desc,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (isSelected) {
+                        Icon(
+                            Icons.Outlined.CheckCircle,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun StepTwoContent(
+    webhookUrl: String,
+    onUrlChange: (String) -> Unit,
+    channelName: String,
+    onNameChange: (String) -> Unit,
+    urlError: String?,
+    selectedType: ChannelType
+) {
+    Column {
+        Text(
+            text = "通道名称（可选）",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        OutlinedTextField(
+            value = channelName,
+            onValueChange = onNameChange,
+            placeholder = { Text("留空使用默认名称") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.medium
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+            text = "Webhook 地址",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        OutlinedTextField(
+            value = webhookUrl,
+            onValueChange = onUrlChange,
+            placeholder = {
+                Text(
+                    when (selectedType) {
+                        ChannelType.WECHAT -> "https://qyapi.weixin.qq.com/..."
+                        ChannelType.DINGTALK -> "https://oapi.dingtalk.com/..."
+                        ChannelType.FEISHU -> "https://open.feishu.cn/..."
+                        ChannelType.GENERIC_WEBHOOK -> "https://api.day.app/你的Key/"
+                    }
+                )
+            },
+            isError = urlError != null,
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.medium
+        )
+        if (urlError != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = urlError,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            text = if (selectedType == ChannelType.GENERIC_WEBHOOK) {
+                "Bark：复制 iPhone 上 Bark 的服务器地址和 Key，填入 https://api.day.app/你的Key/，删除后面的示例标题和正文。自建 Bark 服务器也可使用。"
+            } else {
+                "不知道怎么获取 Webhook？在对应群聊中添加「群机器人」，复制机器人的 Webhook 地址粘贴到这里即可。"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun StepThreeContent(
+    keyword: String,
+    onKeywordChange: (String) -> Unit,
+    channelName: String,
+    channelType: ChannelType,
+    webhookUrl: String
+) {
+    Column {
+        Text(
+            text = "关键词（可选）",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        OutlinedTextField(
+            value = keyword,
+            onValueChange = onKeywordChange,
+            placeholder = { Text("留空则转发全部短信") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.medium
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "例如输入「验证码」，则只有包含验证码的短信才会转发。留空则所有短信都转发。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 配置摘要
+        ModernCard(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "配置摘要",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                SummaryRow("通道类型", defaultChannelName(channelType))
+                Spacer(modifier = Modifier.height(6.dp))
+                SummaryRow("通道名称", channelName)
+                Spacer(modifier = Modifier.height(6.dp))
+                SummaryRow(
+                    "关键词",
+                    keyword.ifBlank { "全部转发" }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(80.dp)
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f)
+        )
+    }
+}
+
+/**
+ * 过滤规则类型：用于区分快捷规则的预设内容
+ */
+enum class FilterRuleType {
+    SENDER_WHITELIST,   // 发送者白名单（信任的号码）
+    SENDER_BLACKLIST,   // 发送者黑名单（拦截的号码）
+    CONTENT_WHITELIST,  // 内容白名单（信任的关键词）
+    CONTENT_BLACKLIST   // 内容黑名单（拦截的关键词）
+}
+
+/**
+ * 发送者/内容过滤编辑对话框
+ */
+@Composable
+fun SenderFilterDialog(
+    title: String,
+    description: String,
+    items: List<String>,
+    ruleType: FilterRuleType = FilterRuleType.SENDER_WHITELIST,
+    onDismiss: () -> Unit,
+    onSave: (List<String>) -> Unit
+) {
+    val rules = remember { mutableStateListOf<String>().apply { addAll(items) } }
+    var newRule by remember { mutableStateOf("") }
+
+    // 快捷规则（根据类型显示不同的预设，白名单正向、黑名单负向）
+    val quickRules = when (ruleType) {
+        FilterRuleType.SENDER_WHITELIST -> listOf(
+            "10086", "10000", "10010", "955*", "12306", "12345", "96110", "138*", "139*"
+        )
+        FilterRuleType.SENDER_BLACKLIST -> listOf(
+            "106*", "170*", "167*", "171*", "955*", "400*", "950*", "951*", "952*", "957*", "+00*", "00*"
+        )
+        FilterRuleType.CONTENT_WHITELIST -> listOf(
+            "*验证码*", "*银行*", "*订单*", "*快递*", "*支付*", "*税务*", "*市场监督*", "*外卖*", "*机票*", "*通知*"
+        )
+        FilterRuleType.CONTENT_BLACKLIST -> listOf(
+            "*拒收回*", "*推销*", "*贷款*", "*保险*", "*赌场*", "*中奖*", "*刷单*", "*博彩*", "*免费领取*"
+        )
+    }
+
+    // 输入框 placeholder
+    val placeholderText = when (ruleType) {
+        FilterRuleType.SENDER_WHITELIST -> "如：10086、955*"
+        FilterRuleType.SENDER_BLACKLIST -> "如：106*、400*"
+        FilterRuleType.CONTENT_WHITELIST -> "如：*验证码*"
+        FilterRuleType.CONTENT_BLACKLIST -> "如：*推销*"
+    }
+
+    fun addRule(rule: String) {
+        val trimmed = rule.trim()
+        if (trimmed.isNotBlank() && trimmed !in rules) {
+            rules.add(trimmed)
+        }
+    }
+
+    ModernAlertDialog(
+        onDismissRequest = onDismiss,
+        title = title,
+        content = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // 添加输入框
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = newRule,
+                        onValueChange = { newRule = it },
+                        label = { Text("添加规则") },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true,
+                        placeholder = { Text(placeholderText) },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                            onDone = {
+                                addRule(newRule)
+                                newRule = ""
+                            }
+                        )
+                    )
+                    Button(
+                        onClick = {
+                            addRule(newRule)
+                            newRule = ""
+                        },
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Outlined.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("添加")
+                    }
+                }
+
+                // 快捷规则
+                Text(
+                    "快捷添加",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    quickRules.forEach { rule ->
+                        val isAdded = rule in rules
+                        AssistChip(
+                            onClick = {
+                                if (isAdded) {
+                                    rules.remove(rule)
+                                } else {
+                                    addRule(rule)
+                                }
+                            },
+                            label = {
+                                Text(
+                                    rule,
+                                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            },
+                            leadingIcon = if (isAdded) {
+                                { Icon(Icons.Outlined.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                            } else null,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                    }
+                }
+
+                // 已添加的规则列表（纵向列表，每行一条完整显示）
+                Text(
+                    "已添加规则（${rules.size} 条）",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.Medium
+                )
+                if (rules.isEmpty()) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Text(
+                            text = "暂无规则，全部放行",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(16.dp),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
+                } else {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 200.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier.verticalScroll(rememberScrollState())
+                        ) {
+                            rules.forEachIndexed { index, rule ->
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { rules.removeAt(index) }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.Label,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = rule,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Icon(
+                                        Icons.Outlined.Close,
+                                        contentDescription = "删除",
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                if (index < rules.size - 1) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(start = 44.dp),
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onSave(rules.toList()) },
+                shape = RoundedCornerShape(12.dp)
+            ) { Text("保存") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
+    )
+}
+
+private fun loadChannels(prefs: android.content.SharedPreferences): List<Channel> = ChannelLoader.loadChannels(prefs)
+
+internal fun saveChannels(prefs: android.content.SharedPreferences, channels: List<Channel>) = ChannelLoader.saveChannels(prefs, channels)
+
+private fun loadConfigs(prefs: android.content.SharedPreferences): List<KeywordConfig> = ChannelLoader.loadConfigs(prefs)
+
+internal fun saveConfigs(prefs: android.content.SharedPreferences, configs: List<KeywordConfig>) = ChannelLoader.saveConfigs(prefs, configs)
+
+/**
+ * 从 SharedPreferences 加载发送者过滤列表（JSON 数组格式）
+ */
+private fun loadSenderFilterList(prefs: android.content.SharedPreferences, key: String): List<String> {
+    val jsonStr = prefs.getString(key, null) ?: return emptyList()
+    if (jsonStr.isBlank()) return emptyList()
+    return try {
+        val arr = org.json.JSONArray(jsonStr)
+        val list = mutableListOf<String>()
+        for (i in 0 until arr.length()) {
+            list.add(arr.getString(i))
+        }
+        list
+    } catch (e: Exception) {
+        emptyList()
+    }
+}
+
+/**
+ * 保存发送者过滤列表到 SharedPreferences（JSON 数组格式）
+ */
+private fun saveSenderFilterList(prefs: android.content.SharedPreferences, key: String, list: List<String>) {
+    if (list.isEmpty()) {
+        prefs.edit().remove(key).apply()
+    } else {
+        val arr = org.json.JSONArray()
+        list.forEach { arr.put(it) }
+        prefs.edit().putString(key, arr.toString()).apply()
+    }
+}
+
+private fun saveConfigToDownloads(
+    context: Context,
+    jsonStr: String,
+    fileName: String = "sms_forwarder_config_${System.currentTimeMillis()}.json"
+): android.net.Uri = ConfigManager.saveConfigToDownloads(context, jsonStr, fileName)
+
+internal fun importConfigFromJson(
+    context: Context,
+    jsonStr: String,
+    onImportSuccess: () -> Unit
+) = ConfigManager.importConfigFromJson(context, jsonStr, onImportSuccess)
