@@ -5,6 +5,9 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val barkVersionName = providers.gradleProperty("barkVersionName").get()
+val barkVersionCode = providers.gradleProperty("barkVersionCode").get().toInt()
+
 android {
     namespace = "com.lanbing.smsforwarder"
     compileSdk = 34
@@ -18,8 +21,8 @@ android {
         val versionNameFromProp = (project.findProperty("VERSION_NAME") ?: System.getenv("VERSION_NAME"))?.toString()
         val versionCodeFromProp = (project.findProperty("VERSION_CODE") ?: System.getenv("VERSION_CODE"))?.toString()
 
-        versionName = versionNameFromProp ?: "2.9.6"
-        versionCode = (versionCodeFromProp?.toIntOrNull() ?: 38)
+        versionName = versionNameFromProp ?: barkVersionName
+        versionCode = (versionCodeFromProp?.toIntOrNull() ?: barkVersionCode)
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["appLabel"] = "短信转发助手"
@@ -30,13 +33,16 @@ android {
     signingConfigs {
         create("bark") {
             val propertiesFile = rootProject.file("bark-signing.properties")
+            val properties = Properties()
             if (propertiesFile.exists()) {
-                val properties = Properties().apply { propertiesFile.inputStream().use { load(it) } }
-                storeFile = rootProject.file(properties.getProperty("storeFile"))
-                storePassword = properties.getProperty("storePassword")
-                keyAlias = properties.getProperty("keyAlias")
-                keyPassword = properties.getProperty("keyPassword")
+                propertiesFile.inputStream().use { properties.load(it) }
             }
+            // CI uses environment variables; local builds can restore the private backup file.
+            val keystorePath = System.getenv("KEYSTORE_FILE") ?: properties.getProperty("storeFile")
+            if (!keystorePath.isNullOrBlank()) storeFile = rootProject.file(keystorePath)
+            storePassword = System.getenv("KEYSTORE_PASSWORD") ?: properties.getProperty("storePassword")
+            keyAlias = System.getenv("KEY_ALIAS") ?: properties.getProperty("keyAlias")
+            keyPassword = System.getenv("KEY_PASSWORD") ?: properties.getProperty("keyPassword")
         }
         create("release") {
             val keystoreFileEnv = System.getenv("KEYSTORE_FILE")
@@ -88,7 +94,7 @@ android {
         create("bark") {
             initWith(getByName("release"))
             applicationIdSuffix = ".bark"
-            versionNameSuffix = "-bark.26"
+            versionNameSuffix = "-bark.$barkVersionCode"
             manifestPlaceholders["appLabel"] = "短信转发助手 Bark"
             signingConfig = signingConfigs.getByName("bark")
             matchingFallbacks += listOf("release")
@@ -145,7 +151,7 @@ tasks.matching { it.name == "preBarkBuild" || it.name == "validateSigningBark" }
         val config = android.signingConfigs.getByName("bark")
         check(config.storeFile?.isFile == true && !config.storePassword.isNullOrBlank() &&
             !config.keyAlias.isNullOrBlank() && !config.keyPassword.isNullOrBlank()) {
-            "Restore bark-signing.properties and signing/smsforwarder-bark.jks from the signing backup before building Bark."
+            "Restore the original Bark signing backup locally, or configure the KEYSTORE_* environment variables in CI."
         }
     }
 }

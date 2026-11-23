@@ -1,7 +1,17 @@
-name: Build Bark-compatible APK
+name: Build signed Bark APK
 
 on:
   workflow_dispatch:
+  workflow_call:
+    secrets:
+      KEYSTORE_BASE64:
+        required: true
+      KEYSTORE_PASSWORD:
+        required: true
+      KEY_ALIAS:
+        required: true
+      KEY_PASSWORD:
+        required: true
 
 permissions:
   contents: read
@@ -9,19 +19,61 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - name: Checkout source
+        uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check release verification helpers
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py'
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6.3.0
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v6.4.1
+
+      - name: Run app unit tests
+        run: bash ./gradlew :app:testDebugUnitTest --no-daemon --no-configuration-cache
+
+      - name: Restore and check the permanent Bark signing key
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/smsforwarder-bark.jks
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: python3 .github/scripts/bark_release.py prepare-signing
+
+      - name: Build signed Bark APK
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/smsforwarder-bark.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: bash ./gradlew :app:assembleBark --no-daemon --no-configuration-cache
+
+      - name: Verify APK identity, signature and version
+        id: apk
+        run: python3 .github/scripts/bark_release.py verify-apk
+
+      - name: Upload verified APK and checksums
+        uses: actions/upload-artifact@v7.0.2
         with:
-          gradle-version: '8.4'
-      - name: Verify requests and build installable APK
-        run: gradle :app:testDebugUnitTest :app:assembleBark -PVERSION_NAME=2.9.8 -PVERSION_CODE=1 --no-daemon
-      - uses: actions/upload-artifact@v4
-        with:
-          name: smsforwarder-2.9.8-bark.1
-          path: app/build/outputs/apk/bark/*.apk
+          name: ${{ steps.apk.outputs.artifact_name }}
+          path: release-artifacts/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove temporary signing key
+        if: always()
+        shell: bash
+        run: rm -f -- "${RUNNER_TEMP}/smsforwarder-bark.jks"

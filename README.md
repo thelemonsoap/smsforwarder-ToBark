@@ -1,3 +1,61 @@
+# 短信转发助手 Bark 增强版
+
+基于 [SmsForwarder.cn / smsforwarder](https://github.com/Lucian-Wang/smsforwarder) 修改的非官方 Android 开源增强分支，修改基础为 v2.9.8，由 [thelemonsoap](https://github.com/thelemonsoap) 维护。原项目曾使用 `huahaotech/smsforwarder.cn` 地址，GitHub 当前 Fork 关联以上方上游仓库为准。
+
+**当前版本：2.9.8-bark.26，内部版本号 versionCode：26。**
+
+[下载 APK](https://github.com/thelemonsoap/smsforwarder-ToBark/releases) · [构建与发布说明](RELEASE.md) · [完整修改记录](BARK_README.txt) · [许可证](LICENSE.txt)
+
+## 功能
+
+- 支持 Bark、自定义 Webhook，以及原项目的企业微信、钉钉、飞书等转发渠道。
+- 支持短信、来电、未接／拒接、号码补充、应用通知、电量及 LTE／5G 切换提醒。
+- 13 类推送可分别设置模板；应用通知还支持按应用单独覆盖模板，自由安排应用名、标题和正文的位置。
+- 模板变量菜单默认收起，展开后可查看该类模板支持的全部变量，并点击插入。
+- 支持联系人姓名匹配、关键词和内容过滤、验证码提取、配置导入导出。
+- 电量按 10% 阶段提醒，未充电状态显示为“使用”。移动信号使用 5 分钟波动过滤，通话期间及结束后 30 秒保持信号提醒静默，连接 Wi-Fi 时暂停 LTE／5G 检测。
+- 纯黑界面、设置二级菜单、底部 dock 滑块、统一圆角；真实背景模糊限顶栏与 dock 内。
+- 半透明黑色桌面小组件，按发送成功与服务状态事件更新，无定时刷新；磨砂采用静态纹理，不包含壁纸实时模糊。
+
+## 使用
+
+1. 从本仓库 Releases 下载 APK，按 Android 提示安装。
+2. 在 App 中添加转发通道，填写自己的 Bark 地址或其他渠道参数并测试。
+3. 按需要授予短信、电话、通讯录和通知访问权限，并配置后台运行设置。
+4. 启用需要的提醒。正文模板在“设置 → 推送模板”中编辑。
+
+本分支沿用原 Bark 永久签名和 `com.lanbing.smsforwarder.bark` 包名。后台运行、来电通知和桌面显示效果依手机系统而异。
+
+## 构建与版本
+
+使用 JDK 17、仓库自带的 Gradle Wrapper 8.4，以及 Android SDK 34。版本集中在根目录 `gradle.properties`：
+
+```properties
+barkVersionName=2.9.8
+barkVersionCode=26
+```
+
+以上配置生成 2.9.8-bark.26。后续 bark.27 将编号改为 27，再同步修改版本说明；这个编号同时用于 Bark 后缀和内部版本号。
+
+本机恢复自己保存的原签名备份后运行：
+
+```bash
+bash ./gradlew :app:testDebugUnitTest :app:assembleBark
+```
+
+正式 APK 位于 `app/build/outputs/apk/bark/`。GitHub Actions 通过仓库 Secrets 恢复同一把原签名，操作见 [RELEASE.md](RELEASE.md)。当前流程为手动运行正式构建，再手动发布 GitHub Release。
+
+## 开源来源与许可证
+
+本仓库是个人维护的增强分支，非上游官方发行版。保留原项目著作权、MIT 许可及第三方组件的许可说明，详见 [LICENSE.txt](LICENSE.txt) 和 `app/src/main/assets/` 中的许可文件。
+
+签名私钥、签名密码、个人 Bark 设备 Key 和个人配置保存在本机或 GitHub Secrets 中。构建脚本中的证书 SHA-256 是公开指纹，用于核对覆盖升级所需的同一签名。
+
+历史构建与验证记录见 [BARK_README.txt](BARK_README.txt)。当前构建和发布步骤以本页及 [RELEASE.md](RELEASE.md) 为准。
+
+<details>
+<summary>历史说明和上游使用文档（旧版本构建命令仅供追溯）</summary>
+
 ## Bark定制版 bark.14：Liquid Glass风格界面
 
 Liquid Glass风格界面版（2.9.8-bark.14，versionCode 14）
@@ -386,3 +444,5 @@ A: 打开应用后，在首页点击「快速创建」卡片，按三步向导�
 如果这个项目对你有帮助，欢迎给个 ⭐ Star！
 
 </div>
+
+</details>
